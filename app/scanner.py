@@ -21,14 +21,17 @@ class FuturesScanner:
         self.settings = settings
         self.store = store
         self.alerter = alerter
+        self._active_symbols: list[str] = list(settings.symbols)
         self._candles: dict[tuple[str, str], pd.DataFrame] = {}
         self._stop_event = asyncio.Event()
         self._started_at: datetime | None = None
         self._initial_load_completed_at: datetime | None = None
         self._last_message_at: datetime | None = None
         self._last_rest_refresh_at: datetime | None = None
+        self._watchlist_updated_at: datetime | None = None
         self._last_error: str | None = None
         self._websocket_connected = False
+        self._watchlist_version = 0
 
     async def start(self) -> None:
         self._started_at = datetime.now(timezone.utc)
@@ -39,6 +42,7 @@ class FuturesScanner:
 
     async def _refresh_candles_loop(self) -> None:
         while not self._stop_event.is_set():
+            await self._refresh_watchlist()
             await self._load_initial_candles()
             await asyncio.sleep(60)
 
@@ -46,7 +50,7 @@ class FuturesScanner:
         async with httpx.AsyncClient(base_url=self.settings.binance_rest_url, timeout=15) as client:
             tasks = [
                 self._fetch_klines(client, symbol, timeframe)
-                for symbol in self.settings.symbols
+                for symbol in self._active_symbols
                 for timeframe in self.settings.timeframes
             ]
             results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -65,6 +69,53 @@ class FuturesScanner:
         self._initial_load_completed_at = datetime.now(timezone.utc)
         self._last_rest_refresh_at = self._initial_load_completed_at
 
+    async def _refresh_watchlist(self) -> None:
+        if not self.settings.auto_watchlist_enabled:
+            return
+        if self._watchlist_updated_at:
+            age = (datetime.now(timezone.utc) - self._watchlist_updated_at).total_seconds()
+            if age < self.settings.watchlist_refresh_seconds:
+                return
+
+        try:
+            async with httpx.AsyncClient(base_url=self.settings.binance_rest_url, timeout=15) as client:
+                exchange_info_response, tickers_response = await asyncio.gather(
+                    client.get("/fapi/v1/exchangeInfo"),
+                    client.get("/fapi/v1/ticker/24hr"),
+                )
+                exchange_info_response.raise_for_status()
+                tickers_response.raise_for_status()
+
+            tradable = {
+                item["symbol"]
+                for item in exchange_info_response.json()["symbols"]
+                if item.get("quoteAsset") == "USDT"
+                and item.get("contractType") == "PERPETUAL"
+                and item.get("status") == "TRADING"
+            }
+            tickers = [
+                item
+                for item in tickers_response.json()
+                if item.get("symbol") in tradable and float(item.get("quoteVolume", 0) or 0) > 0
+            ]
+            tickers.sort(key=lambda item: float(item.get("quoteVolume", 0) or 0), reverse=True)
+            symbols = [item["symbol"] for item in tickers[: self.settings.auto_watchlist_size]]
+            if not symbols:
+                return
+
+            if symbols != self._active_symbols:
+                old_pairs = set((symbol, timeframe) for symbol in symbols for timeframe in self.settings.timeframes)
+                self._candles = {key: value for key, value in self._candles.items() if key in old_pairs}
+                self._active_symbols = symbols
+                self._watchlist_version += 1
+                logger.info("Updated auto watchlist: %s", ", ".join(symbols))
+
+            self._watchlist_updated_at = datetime.now(timezone.utc)
+            self._last_error = None
+        except Exception as exc:
+            self._last_error = f"Auto watchlist refresh failed: {exc}"
+            logger.exception("Auto watchlist refresh failed.")
+
     async def _fetch_klines(
         self, client: httpx.AsyncClient, symbol: str, timeframe: str
     ) -> tuple[str, str, pd.DataFrame]:
@@ -79,9 +130,10 @@ class FuturesScanner:
         backoff_seconds = 1
         while not self._stop_event.is_set():
             try:
+                websocket_version = self._watchlist_version
                 streams = "/".join(
                     f"{symbol.lower()}@kline_{timeframe}"
-                    for symbol in self.settings.symbols
+                    for symbol in self._active_symbols
                     for timeframe in self.settings.timeframes
                 )
                 ws_url = f"{self.settings.binance_ws_url}?streams={streams}"
@@ -90,10 +142,16 @@ class FuturesScanner:
                     self._websocket_connected = True
                     self._last_error = None
                     backoff_seconds = 1
-                    async for message in websocket:
+                    while not self._stop_event.is_set():
+                        if websocket_version != self._watchlist_version:
+                            logger.info("Watchlist changed. Reconnecting websocket.")
+                            break
+                        message = await asyncio.wait_for(websocket.recv(), timeout=60)
                         if self._stop_event.is_set():
                             break
                         await self._handle_ws_message(message)
+            except TimeoutError:
+                logger.info("Websocket receive timeout. Reconnecting.")
             except asyncio.CancelledError:
                 raise
             except Exception:
@@ -135,7 +193,7 @@ class FuturesScanner:
 
     def status(self) -> dict:
         pairs = []
-        for symbol in self.settings.symbols:
+        for symbol in self._active_symbols:
             for timeframe in self.settings.timeframes:
                 candles = self._candles.get((symbol, timeframe))
                 latest = None
@@ -161,15 +219,22 @@ class FuturesScanner:
             "running": self._started_at is not None and not self._stop_event.is_set(),
             "websocket_connected": self._websocket_connected,
             "telegram_enabled": self.alerter.enabled,
+            "auto_watchlist_enabled": self.settings.auto_watchlist_enabled,
+            "watchlist_size": len(self._active_symbols),
+            "active_symbols": self._active_symbols,
             "started_at": self._started_at.isoformat() if self._started_at else None,
             "initial_load_completed_at": self._initial_load_completed_at.isoformat()
             if self._initial_load_completed_at
             else None,
             "last_message_at": self._last_message_at.isoformat() if self._last_message_at else None,
             "last_rest_refresh_at": self._last_rest_refresh_at.isoformat() if self._last_rest_refresh_at else None,
+            "watchlist_updated_at": self._watchlist_updated_at.isoformat() if self._watchlist_updated_at else None,
             "last_error": self._last_error,
             "pairs": pairs,
         }
+
+    def symbols(self) -> list[str]:
+        return list(self._active_symbols)
 
     def _upsert_candle(self, symbol: str, timeframe: str, row: dict) -> None:
         key = (symbol, timeframe)

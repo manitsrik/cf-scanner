@@ -7,7 +7,8 @@ This app does not place trades, does not use private Binance API keys, and does 
 ## Features
 
 - Binance USDT Futures public kline data
-- Symbols: `BTCUSDT`, `ETHUSDT`, `SOLUSDT`, `BNBUSDT`
+- Auto watchlist: top USDT perpetual futures by 24h quote volume
+- Fallback symbols: `BTCUSDT`, `ETHUSDT`, `SOLUSDT`, `BNBUSDT`
 - Timeframes: `15m`, `30m`
 - Indicators: EMA 9, EMA 21, EMA 200, RSI 14, volume average 20
 - LONG and SHORT signal detection
@@ -55,6 +56,9 @@ Create a `.env` file if you want Telegram alerts:
 ```env
 TELEGRAM_BOT_TOKEN=your_bot_token
 TELEGRAM_CHAT_ID=your_chat_id
+AUTO_WATCHLIST_ENABLED=true
+AUTO_WATCHLIST_SIZE=20
+WATCHLIST_REFRESH_SECONDS=900
 ```
 
 Run locally:
@@ -80,6 +84,12 @@ http://localhost:8000
 `/status` shows scanner runtime state, websocket state, Telegram status, and latest closed candle time for every configured symbol/timeframe.
 
 `/telegram/test` sends a test Telegram message when `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` are configured.
+
+## Watchlist
+
+By default the scanner builds an automatic watchlist from Binance USDT perpetual futures. It ranks markets by 24h `quoteVolume` and scans the top `AUTO_WATCHLIST_SIZE` symbols.
+
+Set `AUTO_WATCHLIST_ENABLED=false` to scan only the fixed fallback list in `app/config.py`.
 
 ## Docker
 
@@ -114,6 +124,9 @@ Do not commit `.env`. Use `.env.example` as the template.
 
 - `TELEGRAM_BOT_TOKEN`
 - `TELEGRAM_CHAT_ID`
+- `AUTO_WATCHLIST_ENABLED`
+- `AUTO_WATCHLIST_SIZE`
+- `WATCHLIST_REFRESH_SECONDS`
 
 Railway provides `PORT` automatically. The Dockerfile uses that value and falls back to `8000` locally.
 

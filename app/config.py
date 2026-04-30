@@ -9,6 +9,9 @@ class Settings(BaseSettings):
     app_name: str = "CF Scanner"
     symbols: list[str] = Field(default_factory=lambda: ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT"])
     timeframes: list[str] = Field(default_factory=lambda: ["15m", "30m"])
+    auto_watchlist_enabled: bool = True
+    auto_watchlist_size: int = 20
+    watchlist_refresh_seconds: int = 900
     kline_limit: int = 250
     binance_rest_url: str = "https://fapi.binance.com"
     binance_ws_url: str = "wss://fstream.binance.com/stream"
@@ -20,4 +23,3 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
-

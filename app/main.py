@@ -65,7 +65,7 @@ async def signals() -> list[Signal]:
 
 @app.get("/symbols", response_model=SymbolInfo)
 async def symbols() -> SymbolInfo:
-    return SymbolInfo(symbols=settings.symbols, timeframes=settings.timeframes)
+    return SymbolInfo(symbols=scanner.symbols(), timeframes=settings.timeframes)
 
 
 @app.get("/status")

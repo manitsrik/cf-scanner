@@ -72,7 +72,7 @@
       .summary {
         display: grid;
         gap: 12px;
-        grid-template-columns: repeat(6, minmax(0, 1fr));
+        grid-template-columns: repeat(4, minmax(0, 1fr));
         margin-bottom: 18px;
       }
 
@@ -225,6 +225,14 @@
           <span class="metric-label">Last Error</span>
           <span class="metric-value" id="lastError">None</span>
         </div>
+        <div class="metric">
+          <span class="metric-label">Watchlist</span>
+          <span class="metric-value" id="watchlistState">Loading</span>
+        </div>
+        <div class="metric">
+          <span class="metric-label">Watchlist Updated</span>
+          <span class="metric-value" id="watchlistUpdated">Waiting</span>
+        </div>
       </section>
 
       <div class="table-wrap">
@@ -278,6 +286,8 @@
       const lastMessageEl = document.getElementById("lastMessage");
       const lastRestRefreshEl = document.getElementById("lastRestRefresh");
       const lastErrorEl = document.getElementById("lastError");
+      const watchlistStateEl = document.getElementById("watchlistState");
+      const watchlistUpdatedEl = document.getElementById("watchlistUpdated");
       const scannerPairsEl = document.getElementById("scannerPairs");
       const refreshButton = document.getElementById("refreshButton");
       const testTelegramButton = document.getElementById("testTelegramButton");
@@ -303,6 +313,10 @@
         lastMessageEl.textContent = formatTime(status.last_message_at);
         lastRestRefreshEl.textContent = formatTime(status.last_rest_refresh_at);
         lastErrorEl.textContent = status.last_error || "None";
+        watchlistStateEl.textContent = `${status.auto_watchlist_enabled ? "Auto" : "Fixed"} - ${
+          status.watchlist_size
+        } symbols`;
+        watchlistUpdatedEl.textContent = formatTime(status.watchlist_updated_at);
 
         if (!status.pairs.length) {
           scannerPairsEl.innerHTML = '<tr><td class="empty" colspan="5">No scanner pairs configured.</td></tr>';
