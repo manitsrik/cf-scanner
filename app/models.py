@@ -17,6 +17,8 @@ class Signal(BaseModel):
     volume: float
     volume_average_20: float
     volume_status: str
+    reasons: list[str]
+    indicators: dict[str, float]
     created_at: datetime
     tradingview_url: str
 
@@ -24,4 +26,3 @@ class Signal(BaseModel):
 class SymbolInfo(BaseModel):
     symbols: list[str]
     timeframes: list[str]
-

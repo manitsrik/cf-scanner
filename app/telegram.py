@@ -22,6 +22,8 @@ class TelegramAlerter:
             f"Price: {signal.price:.4f}\n"
             f"RSI 14: {signal.rsi:.2f}\n"
             f"Volume: {signal.volume:.2f} > avg20 {signal.volume_average_20:.2f}\n"
+            + "\n".join(f"- {reason}" for reason in signal.reasons)
+            + "\n"
             f"{signal.tradingview_url}"
         )
         return await self.send_text(text)

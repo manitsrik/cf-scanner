@@ -15,6 +15,7 @@ This app does not place trades, does not use private Binance API keys, and does 
 - In-memory latest signal storage
 - Telegram alert for each new signal
 - Simple HTML dashboard
+- Signal reason details and dashboard filters
 - Docker-ready deployment
 
 ## Signal Rules

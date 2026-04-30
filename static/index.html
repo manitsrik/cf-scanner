@@ -192,8 +192,31 @@
       .section-head {
         align-items: flex-end;
         display: flex;
+        gap: 12px;
         justify-content: space-between;
         margin-bottom: 10px;
+      }
+
+      .filters {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin-bottom: 10px;
+      }
+
+      input,
+      select {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 7px;
+        color: var(--text);
+        font-size: 14px;
+        min-height: 36px;
+        padding: 0 11px;
+      }
+
+      input {
+        min-width: 220px;
       }
 
       h2 {
@@ -316,6 +339,19 @@
         padding: 30px 16px;
       }
 
+      .detail-list {
+        color: var(--muted);
+        display: grid;
+        gap: 4px;
+        line-height: 1.35;
+        margin-top: 8px;
+        white-space: normal;
+      }
+
+      .detail-list div {
+        max-width: 520px;
+      }
+
       @media (max-width: 980px) {
         .topbar {
           align-items: flex-start;
@@ -355,6 +391,12 @@
           align-items: flex-start;
           flex-direction: column;
           gap: 4px;
+        }
+
+        .filters,
+        input,
+        select {
+          width: 100%;
         }
       }
     </style>
@@ -419,6 +461,19 @@
           <h2>Signals</h2>
           <div class="section-note">Closed-candle signals that passed trend, cross, RSI, and volume checks</div>
         </div>
+        <div class="filters">
+          <input id="signalSearch" type="search" placeholder="Search signal symbol..." />
+          <select id="signalTypeFilter">
+            <option value="all">All signals</option>
+            <option value="LONG">LONG only</option>
+            <option value="SHORT">SHORT only</option>
+          </select>
+          <select id="signalTimeframeFilter">
+            <option value="all">All timeframes</option>
+            <option value="15m">15m</option>
+            <option value="30m">30m</option>
+          </select>
+        </div>
         <div class="table-wrap">
           <table>
             <thead>
@@ -446,6 +501,14 @@
         <div class="section-head">
           <h2>Market Watchlist</h2>
           <div class="section-note">Top USDT perpetual markets by 24h quote volume</div>
+        </div>
+        <div class="filters">
+          <input id="watchlistSearch" type="search" placeholder="Search watchlist symbol..." />
+          <select id="watchlistTimeframeFilter">
+            <option value="all">All timeframes</option>
+            <option value="15m">15m</option>
+            <option value="30m">30m</option>
+          </select>
         </div>
         <div class="table-wrap">
           <table>
@@ -483,6 +546,13 @@
       const refreshButton = document.getElementById("refreshButton");
       const themeButton = document.getElementById("themeButton");
       const testTelegramButton = document.getElementById("testTelegramButton");
+      const signalSearch = document.getElementById("signalSearch");
+      const signalTypeFilter = document.getElementById("signalTypeFilter");
+      const signalTimeframeFilter = document.getElementById("signalTimeframeFilter");
+      const watchlistSearch = document.getElementById("watchlistSearch");
+      const watchlistTimeframeFilter = document.getElementById("watchlistTimeframeFilter");
+      let currentSignals = [];
+      let currentPairs = [];
 
       function applyTheme(theme) {
         document.documentElement.dataset.theme = theme;
@@ -535,28 +605,23 @@
         `;
       }
 
-      async function loadStatus() {
-        const response = await fetch("/status");
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        const status = await response.json();
+      function matchesText(symbol, query) {
+        return symbol.toLowerCase().includes(query.trim().toLowerCase());
+      }
 
-        scannerStateEl.textContent = status.running ? "Running" : "Stopped";
-        websocketStateEl.textContent = status.websocket_connected ? "Connected" : "Connecting";
-        telegramStateEl.textContent = status.telegram_enabled ? "Enabled" : "Disabled";
-        lastMessageEl.textContent = formatTime(status.last_message_at);
-        lastRestRefreshEl.textContent = formatTime(status.last_rest_refresh_at);
-        lastErrorEl.textContent = status.last_error || "None";
-        watchlistStateEl.textContent = `${status.auto_watchlist_enabled ? "Auto" : "Fixed"} - ${
-          status.watchlist_size
-        } symbols`;
-        watchlistUpdatedEl.textContent = formatTime(status.watchlist_updated_at);
+      function renderPairs() {
+        const query = watchlistSearch.value;
+        const timeframe = watchlistTimeframeFilter.value;
+        const pairs = currentPairs.filter(
+          (pair) => matchesText(pair.symbol, query) && (timeframe === "all" || pair.timeframe === timeframe)
+        );
 
-        if (!status.pairs.length) {
-          scannerPairsEl.innerHTML = '<tr><td class="empty" colspan="5">No scanner pairs configured.</td></tr>';
+        if (!pairs.length) {
+          scannerPairsEl.innerHTML = '<tr><td class="empty" colspan="5">No watchlist rows match your filters.</td></tr>';
           return;
         }
 
-        scannerPairsEl.innerHTML = status.pairs
+        scannerPairsEl.innerHTML = pairs
           .map(
             (pair) => `
               <tr>
@@ -571,14 +636,19 @@
           .join("");
       }
 
-      async function loadSignals() {
-        const response = await fetch("/signals");
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        const signals = await response.json();
-        statusEl.textContent = `Live - ${signals.length} signal${signals.length === 1 ? "" : "s"}`;
+      function renderSignals() {
+        const query = signalSearch.value;
+        const signalType = signalTypeFilter.value;
+        const timeframe = signalTimeframeFilter.value;
+        const signals = currentSignals.filter(
+          (signal) =>
+            matchesText(signal.symbol, query) &&
+            (signalType === "all" || signal.signal_type === signalType) &&
+            (timeframe === "all" || signal.timeframe === timeframe)
+        );
 
         if (!signals.length) {
-          signalsEl.innerHTML = '<tr><td class="empty" colspan="8">Waiting for signals...</td></tr>';
+          signalsEl.innerHTML = '<tr><td class="empty" colspan="8">No signals match your filters.</td></tr>';
           return;
         }
 
@@ -595,9 +665,56 @@
                 <td class="muted">${formatTime(signal.created_at)}</td>
                 <td><a href="${signal.tradingview_url}" target="_blank" rel="noreferrer">Open chart</a></td>
               </tr>
+              <tr>
+                <td></td>
+                <td colspan="7">
+                  <div class="detail-list">
+                    ${(signal.reasons || []).map((reason) => `<div>${escapeHtml(reason)}</div>`).join("")}
+                  </div>
+                </td>
+              </tr>
             `
           )
           .join("");
+      }
+
+      async function loadStatus() {
+        const response = await fetch("/status");
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const status = await response.json();
+
+        scannerStateEl.textContent = status.running ? "Running" : "Stopped";
+        websocketStateEl.textContent = status.websocket_connected ? "Connected" : "Connecting";
+        telegramStateEl.textContent = status.telegram_enabled ? "Enabled" : "Disabled";
+        lastMessageEl.textContent = formatTime(status.last_message_at);
+        lastRestRefreshEl.textContent = formatTime(status.last_rest_refresh_at);
+        lastErrorEl.textContent = status.last_error || "None";
+        watchlistStateEl.textContent = `${status.auto_watchlist_enabled ? "Auto" : "Fixed"} - ${
+          status.watchlist_size
+        } symbols`;
+        watchlistUpdatedEl.textContent = formatTime(status.watchlist_updated_at);
+
+        currentPairs = status.pairs;
+        if (!currentPairs.length) {
+          scannerPairsEl.innerHTML = '<tr><td class="empty" colspan="5">No scanner pairs configured.</td></tr>';
+          return;
+        }
+
+        renderPairs();
+      }
+
+      async function loadSignals() {
+        const response = await fetch("/signals");
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        currentSignals = await response.json();
+        statusEl.textContent = `Live - ${currentSignals.length} signal${currentSignals.length === 1 ? "" : "s"}`;
+
+        if (!currentSignals.length) {
+          signalsEl.innerHTML = '<tr><td class="empty" colspan="8">Waiting for signals...</td></tr>';
+          return;
+        }
+
+        renderSignals();
       }
 
       async function refreshAll() {
@@ -628,6 +745,11 @@
       refreshButton.addEventListener("click", refreshAll);
       themeButton.addEventListener("click", toggleTheme);
       testTelegramButton.addEventListener("click", testTelegram);
+      signalSearch.addEventListener("input", renderSignals);
+      signalTypeFilter.addEventListener("change", renderSignals);
+      signalTimeframeFilter.addEventListener("change", renderSignals);
+      watchlistSearch.addEventListener("input", renderPairs);
+      watchlistTimeframeFilter.addEventListener("change", renderPairs);
 
       applyTheme(localStorage.getItem("cf-scanner-theme") || "light");
       refreshAll();

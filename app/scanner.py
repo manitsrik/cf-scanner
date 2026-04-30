@@ -263,19 +263,25 @@ class FuturesScanner:
         rsi = float(latest["rsi_14"])
         volume = float(latest["volume"])
         volume_average = float(latest["volume_avg_20"])
+        ema_9 = float(latest["ema_9"])
+        ema_21 = float(latest["ema_21"])
+        ema_200 = float(latest["ema_200"])
+        previous_ema_9 = float(previous["ema_9"])
+        previous_ema_21 = float(previous["ema_21"])
+        volume_ratio = volume / volume_average if volume_average > 0 else 0
         has_volume = volume > volume_average
 
         long_signal = (
-            price > float(latest["ema_200"])
-            and float(previous["ema_9"]) <= float(previous["ema_21"])
-            and float(latest["ema_9"]) > float(latest["ema_21"])
+            price > ema_200
+            and previous_ema_9 <= previous_ema_21
+            and ema_9 > ema_21
             and rsi > 50
             and has_volume
         )
         short_signal = (
-            price < float(latest["ema_200"])
-            and float(previous["ema_9"]) >= float(previous["ema_21"])
-            and float(latest["ema_9"]) < float(latest["ema_21"])
+            price < ema_200
+            and previous_ema_9 >= previous_ema_21
+            and ema_9 < ema_21
             and rsi < 50
             and has_volume
         )
@@ -283,6 +289,21 @@ class FuturesScanner:
         signal_type = "LONG" if long_signal else "SHORT" if short_signal else None
         if not signal_type:
             return None
+
+        if signal_type == "LONG":
+            reasons = [
+                f"Price {price:.4f} is above EMA200 {ema_200:.4f}",
+                f"EMA9 crossed above EMA21 ({previous_ema_9:.4f}/{previous_ema_21:.4f} -> {ema_9:.4f}/{ema_21:.4f})",
+                f"RSI14 is bullish at {rsi:.2f}",
+                f"Volume is {volume_ratio:.2f}x average 20",
+            ]
+        else:
+            reasons = [
+                f"Price {price:.4f} is below EMA200 {ema_200:.4f}",
+                f"EMA9 crossed below EMA21 ({previous_ema_9:.4f}/{previous_ema_21:.4f} -> {ema_9:.4f}/{ema_21:.4f})",
+                f"RSI14 is bearish at {rsi:.2f}",
+                f"Volume is {volume_ratio:.2f}x average 20",
+            ]
 
         close_time = latest["close_time"].to_pydatetime()
         signal_id = f"{symbol}:{timeframe}:{int(close_time.timestamp())}:{signal_type}"
@@ -295,7 +316,15 @@ class FuturesScanner:
             rsi=rsi,
             volume=volume,
             volume_average_20=volume_average,
-            volume_status="above average",
+            volume_status=f"{volume_ratio:.2f}x avg20",
+            reasons=reasons,
+            indicators={
+                "ema_9": ema_9,
+                "ema_21": ema_21,
+                "ema_200": ema_200,
+                "rsi_14": rsi,
+                "volume_ratio": volume_ratio,
+            },
             created_at=datetime.now(timezone.utc),
             tradingview_url=f"https://www.tradingview.com/chart/?symbol=BINANCE:{symbol}.P",
         )
