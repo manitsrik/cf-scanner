@@ -352,6 +352,55 @@
         max-width: 520px;
       }
 
+      .chart-panel {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        overflow: hidden;
+      }
+
+      .chart-toolbar {
+        align-items: center;
+        border-bottom: 1px solid var(--border-soft);
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        justify-content: space-between;
+        padding: 12px 14px;
+      }
+
+      .chart-title {
+        font-size: 14px;
+        font-weight: 850;
+      }
+
+      .chart-actions {
+        align-items: center;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+
+      .chart-frame {
+        background: var(--surface-muted);
+        height: 560px;
+        width: 100%;
+      }
+
+      .chart-frame iframe {
+        border: 0;
+        display: block;
+        height: 100%;
+        width: 100%;
+      }
+
+      .link-button {
+        background: transparent;
+        color: var(--primary);
+        min-height: 0;
+        padding: 0;
+      }
+
       @media (max-width: 980px) {
         .topbar {
           align-items: flex-start;
@@ -398,6 +447,10 @@
         select {
           width: 100%;
         }
+
+        .chart-frame {
+          height: 420px;
+        }
       }
     </style>
   </head>
@@ -421,6 +474,25 @@
     </header>
 
     <main>
+      <section class="section">
+        <div class="section-head">
+          <h2>Chart</h2>
+          <div class="section-note">Click Chart on any row to load its TradingView futures chart</div>
+        </div>
+        <div class="chart-panel">
+          <div class="chart-toolbar">
+            <div class="chart-title" id="chartTitle">BTCUSDT 15m</div>
+            <div class="chart-actions">
+              <button class="secondary" id="chart15m" type="button">15m</button>
+              <button class="secondary" id="chart30m" type="button">30m</button>
+              <button class="secondary" id="chart1h" type="button">1h</button>
+              <a id="chartOpenLink" href="https://www.tradingview.com/chart/?symbol=BINANCE:BTCUSDT.P" target="_blank" rel="noreferrer">Open full chart</a>
+            </div>
+          </div>
+          <div class="chart-frame" id="chartFrame"></div>
+        </div>
+      </section>
+
       <section class="summary" aria-label="Scanner status">
         <div class="metric">
           <span class="metric-label">Scanner</span>
@@ -494,7 +566,7 @@
                 <th>RSI</th>
                 <th>Volume</th>
                 <th>EMA Gap</th>
-                <th>TradingView</th>
+                <th>Chart</th>
               </tr>
             </thead>
             <tbody id="nearSetups">
@@ -536,7 +608,7 @@
                 <th>RSI</th>
                 <th>Volume Status</th>
                 <th>Created Time</th>
-                <th>TradingView</th>
+                <th>Chart</th>
               </tr>
             </thead>
             <tbody id="signals">
@@ -571,6 +643,7 @@
                 <th>Candles</th>
                 <th>Last Closed Candle</th>
                 <th>Last Close Price</th>
+                <th>Chart</th>
               </tr>
             </thead>
             <tbody id="scannerPairs">
@@ -609,9 +682,17 @@
       const nearTimeframeFilter = document.getElementById("nearTimeframeFilter");
       const watchlistSearch = document.getElementById("watchlistSearch");
       const watchlistTimeframeFilter = document.getElementById("watchlistTimeframeFilter");
+      const chartTitle = document.getElementById("chartTitle");
+      const chartFrame = document.getElementById("chartFrame");
+      const chartOpenLink = document.getElementById("chartOpenLink");
+      const chart15m = document.getElementById("chart15m");
+      const chart30m = document.getElementById("chart30m");
+      const chart1h = document.getElementById("chart1h");
       let currentSignals = [];
       let currentNearSetups = [];
       let currentPairs = [];
+      let currentChartSymbol = "BTCUSDT";
+      let currentChartTimeframe = "15m";
 
       function applyTheme(theme) {
         document.documentElement.dataset.theme = theme;
@@ -664,6 +745,42 @@
         `;
       }
 
+      function tradingViewInterval(timeframe) {
+        if (timeframe === "1h") return "60";
+        return timeframe.replace("m", "");
+      }
+
+      function chartUrl(symbol, timeframe) {
+        const params = new URLSearchParams({
+          symbol: `BINANCE:${symbol}.P`,
+          interval: tradingViewInterval(timeframe),
+          theme: document.documentElement.dataset.theme === "dark" ? "dark" : "light",
+          style: "1",
+          timezone: "Etc/UTC",
+          hide_side_toolbar: "0",
+          allow_symbol_change: "1",
+          save_image: "0",
+        });
+        return `https://s.tradingview.com/widgetembed/?${params.toString()}`;
+      }
+
+      function setChart(symbol, timeframe) {
+        currentChartSymbol = symbol;
+        currentChartTimeframe = timeframe;
+        chartTitle.textContent = `${symbol} ${timeframe}`;
+        chartOpenLink.href = `https://www.tradingview.com/chart/?symbol=BINANCE:${symbol}.P`;
+        chartFrame.innerHTML = `<iframe title="${escapeHtml(symbol)} ${escapeHtml(timeframe)} chart" src="${chartUrl(
+          symbol,
+          timeframe
+        )}" allowtransparency="true" scrolling="no" allowfullscreen></iframe>`;
+      }
+
+      function chartButton(symbol, timeframe) {
+        return `<button class="link-button" type="button" data-chart-symbol="${escapeHtml(
+          symbol
+        )}" data-chart-timeframe="${escapeHtml(timeframe)}">Chart</button>`;
+      }
+
       function matchesText(symbol, query) {
         return symbol.toLowerCase().includes(query.trim().toLowerCase());
       }
@@ -689,6 +806,7 @@
                 <td>${pair.candle_count}</td>
                 <td class="muted">${formatTime(pair.last_closed_candle_at)}</td>
                 <td>${formatPrice(pair.last_close_price)}</td>
+                <td>${chartButton(pair.symbol, pair.timeframe)}</td>
               </tr>
             `
           )
@@ -722,7 +840,7 @@
                 <td>${Number(signal.rsi).toFixed(2)}</td>
                 <td>${signal.volume_status}</td>
                 <td class="muted">${formatTime(signal.created_at)}</td>
-                <td><a href="${signal.tradingview_url}" target="_blank" rel="noreferrer">Open chart</a></td>
+                <td>${chartButton(signal.symbol, signal.timeframe)}</td>
               </tr>
               <tr>
                 <td></td>
@@ -764,7 +882,7 @@
                 <td>${Number(setup.rsi).toFixed(2)}</td>
                 <td>${Number(setup.volume_ratio).toFixed(2)}x avg20</td>
                 <td>${Number(setup.ema_gap_pct).toFixed(3)}%</td>
-                <td><a href="${setup.tradingview_url}" target="_blank" rel="noreferrer">Open chart</a></td>
+                <td>${chartButton(setup.symbol, setup.timeframe)}</td>
               </tr>
             `
           )
@@ -841,9 +959,20 @@
         }
       }
 
+      document.addEventListener("click", (event) => {
+        const button = event.target.closest("[data-chart-symbol]");
+        if (!button) return;
+        setChart(button.dataset.chartSymbol, button.dataset.chartTimeframe);
+      });
       refreshButton.addEventListener("click", refreshAll);
-      themeButton.addEventListener("click", toggleTheme);
+      themeButton.addEventListener("click", () => {
+        toggleTheme();
+        setChart(currentChartSymbol, currentChartTimeframe);
+      });
       testTelegramButton.addEventListener("click", testTelegram);
+      chart15m.addEventListener("click", () => setChart(currentChartSymbol, "15m"));
+      chart30m.addEventListener("click", () => setChart(currentChartSymbol, "30m"));
+      chart1h.addEventListener("click", () => setChart(currentChartSymbol, "1h"));
       signalSearch.addEventListener("input", renderSignals);
       signalTypeFilter.addEventListener("change", renderSignals);
       signalTimeframeFilter.addEventListener("change", renderSignals);
@@ -854,6 +983,7 @@
       watchlistTimeframeFilter.addEventListener("change", renderPairs);
 
       applyTheme(localStorage.getItem("cf-scanner-theme") || "light");
+      setChart(currentChartSymbol, currentChartTimeframe);
       refreshAll();
       setInterval(refreshAll, 15000);
     </script>
