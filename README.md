@@ -74,6 +74,12 @@ http://localhost:8000
 - `GET /health`
 - `GET /signals`
 - `GET /symbols`
+- `GET /status`
+- `POST /telegram/test`
+
+`/status` shows scanner runtime state, websocket state, Telegram status, and latest closed candle time for every configured symbol/timeframe.
+
+`/telegram/test` sends a test Telegram message when `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` are configured.
 
 ## Docker
 

@@ -32,6 +32,12 @@
         margin: 0;
       }
 
+      .actions {
+        align-items: center;
+        display: flex;
+        gap: 12px;
+      }
+
       main {
         padding: 24px clamp(16px, 4vw, 44px);
       }
@@ -41,10 +47,63 @@
         font-size: 14px;
       }
 
+      button {
+        background: #1f6feb;
+        border: 0;
+        border-radius: 6px;
+        color: #ffffff;
+        cursor: pointer;
+        font-size: 14px;
+        font-weight: 700;
+        padding: 9px 12px;
+      }
+
+      button.secondary {
+        background: #ffffff;
+        border: 1px solid #c9d2e3;
+        color: #172033;
+      }
+
+      button:disabled {
+        cursor: wait;
+        opacity: 0.65;
+      }
+
+      .summary {
+        display: grid;
+        gap: 12px;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        margin-bottom: 18px;
+      }
+
+      .metric {
+        background: #ffffff;
+        border: 1px solid #d8deea;
+        border-radius: 8px;
+        padding: 14px;
+      }
+
+      .metric-label {
+        color: #546179;
+        display: block;
+        font-size: 12px;
+        margin-bottom: 6px;
+        text-transform: uppercase;
+      }
+
+      .metric-value {
+        color: #172033;
+        display: block;
+        font-size: 15px;
+        font-weight: 700;
+        overflow-wrap: anywhere;
+      }
+
       .table-wrap {
         background: #ffffff;
         border: 1px solid #d8deea;
         border-radius: 8px;
+        margin-bottom: 18px;
         overflow-x: auto;
       }
 
@@ -100,15 +159,66 @@
         color: #6b7280;
         padding: 28px 16px;
       }
+
+      @media (max-width: 900px) {
+        header {
+          align-items: flex-start;
+          flex-direction: column;
+          gap: 12px;
+        }
+
+        .summary {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+      }
+
+      @media (max-width: 560px) {
+        .actions {
+          align-items: stretch;
+          flex-direction: column;
+          width: 100%;
+        }
+
+        button {
+          width: 100%;
+        }
+
+        .summary {
+          grid-template-columns: 1fr;
+        }
+      }
     </style>
   </head>
   <body>
     <header>
       <h1>Crypto Futures Pattern Scanner</h1>
-      <div class="status" id="status">Loading...</div>
+      <div class="actions">
+        <div class="status" id="status">Loading...</div>
+        <button class="secondary" id="refreshButton" type="button">Refresh</button>
+        <button id="testTelegramButton" type="button">Test Telegram</button>
+      </div>
     </header>
 
     <main>
+      <section class="summary" aria-label="Scanner status">
+        <div class="metric">
+          <span class="metric-label">Scanner</span>
+          <span class="metric-value" id="scannerState">Loading</span>
+        </div>
+        <div class="metric">
+          <span class="metric-label">Websocket</span>
+          <span class="metric-value" id="websocketState">Loading</span>
+        </div>
+        <div class="metric">
+          <span class="metric-label">Telegram</span>
+          <span class="metric-value" id="telegramState">Loading</span>
+        </div>
+        <div class="metric">
+          <span class="metric-label">Last Message</span>
+          <span class="metric-value" id="lastMessage">Waiting</span>
+        </div>
+      </section>
+
       <div class="table-wrap">
         <table>
           <thead>
@@ -130,56 +240,137 @@
           </tbody>
         </table>
       </div>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Symbol</th>
+              <th>Timeframe</th>
+              <th>Candles</th>
+              <th>Last Closed Candle</th>
+              <th>Last Close Price</th>
+            </tr>
+          </thead>
+          <tbody id="scannerPairs">
+            <tr>
+              <td class="empty" colspan="5">Loading scanner status...</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
     </main>
 
     <script>
       const statusEl = document.getElementById("status");
       const signalsEl = document.getElementById("signals");
+      const scannerStateEl = document.getElementById("scannerState");
+      const websocketStateEl = document.getElementById("websocketState");
+      const telegramStateEl = document.getElementById("telegramState");
+      const lastMessageEl = document.getElementById("lastMessage");
+      const scannerPairsEl = document.getElementById("scannerPairs");
+      const refreshButton = document.getElementById("refreshButton");
+      const testTelegramButton = document.getElementById("testTelegramButton");
 
       function formatPrice(value) {
+        if (value === null || value === undefined) return "-";
         return Number(value).toLocaleString(undefined, { maximumFractionDigits: 4 });
       }
 
       function formatTime(value) {
+        if (!value) return "Waiting";
         return new Date(value).toLocaleString();
       }
 
+      async function loadStatus() {
+        const response = await fetch("/status");
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const status = await response.json();
+
+        scannerStateEl.textContent = status.running ? "Running" : "Stopped";
+        websocketStateEl.textContent = status.websocket_connected ? "Connected" : "Connecting";
+        telegramStateEl.textContent = status.telegram_enabled ? "Enabled" : "Disabled";
+        lastMessageEl.textContent = formatTime(status.last_message_at);
+
+        if (!status.pairs.length) {
+          scannerPairsEl.innerHTML = '<tr><td class="empty" colspan="5">No scanner pairs configured.</td></tr>';
+          return;
+        }
+
+        scannerPairsEl.innerHTML = status.pairs
+          .map(
+            (pair) => `
+              <tr>
+                <td>${pair.symbol}</td>
+                <td>${pair.timeframe}</td>
+                <td>${pair.candle_count}</td>
+                <td>${formatTime(pair.last_closed_candle_at)}</td>
+                <td>${formatPrice(pair.last_close_price)}</td>
+              </tr>
+            `
+          )
+          .join("");
+      }
+
       async function loadSignals() {
+        const response = await fetch("/signals");
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const signals = await response.json();
+        statusEl.textContent = `Live - ${signals.length} signal${signals.length === 1 ? "" : "s"}`;
+
+        if (!signals.length) {
+          signalsEl.innerHTML = '<tr><td class="empty" colspan="8">Waiting for signals...</td></tr>';
+          return;
+        }
+
+        signalsEl.innerHTML = signals
+          .map(
+            (signal) => `
+              <tr>
+                <td>${signal.symbol}</td>
+                <td>${signal.timeframe}</td>
+                <td><span class="badge ${signal.signal_type}">${signal.signal_type}</span></td>
+                <td>${formatPrice(signal.price)}</td>
+                <td>${Number(signal.rsi).toFixed(2)}</td>
+                <td>${signal.volume_status}</td>
+                <td>${formatTime(signal.created_at)}</td>
+                <td><a href="${signal.tradingview_url}" target="_blank" rel="noreferrer">Open chart</a></td>
+              </tr>
+            `
+          )
+          .join("");
+      }
+
+      async function refreshAll() {
         try {
-          const response = await fetch("/signals");
-          if (!response.ok) throw new Error(`HTTP ${response.status}`);
-          const signals = await response.json();
-          statusEl.textContent = `Live - ${signals.length} signal${signals.length === 1 ? "" : "s"}`;
-
-          if (!signals.length) {
-            signalsEl.innerHTML = '<tr><td class="empty" colspan="8">Waiting for signals...</td></tr>';
-            return;
-          }
-
-          signalsEl.innerHTML = signals
-            .map(
-              (signal) => `
-                <tr>
-                  <td>${signal.symbol}</td>
-                  <td>${signal.timeframe}</td>
-                  <td><span class="badge ${signal.signal_type}">${signal.signal_type}</span></td>
-                  <td>${formatPrice(signal.price)}</td>
-                  <td>${Number(signal.rsi).toFixed(2)}</td>
-                  <td>${signal.volume_status}</td>
-                  <td>${formatTime(signal.created_at)}</td>
-                  <td><a href="${signal.tradingview_url}" target="_blank" rel="noreferrer">Open chart</a></td>
-                </tr>
-              `
-            )
-            .join("");
+          await Promise.all([loadSignals(), loadStatus()]);
         } catch (error) {
           statusEl.textContent = "API unavailable";
         }
       }
 
-      loadSignals();
-      setInterval(loadSignals, 15000);
+      async function testTelegram() {
+        testTelegramButton.disabled = true;
+        testTelegramButton.textContent = "Sending...";
+        try {
+          const response = await fetch("/telegram/test", { method: "POST" });
+          const result = await response.json();
+          testTelegramButton.textContent = result.status === "sent" ? "Sent" : "Disabled";
+        } catch (error) {
+          testTelegramButton.textContent = "Failed";
+        } finally {
+          window.setTimeout(() => {
+            testTelegramButton.disabled = false;
+            testTelegramButton.textContent = "Test Telegram";
+          }, 2500);
+        }
+      }
+
+      refreshButton.addEventListener("click", refreshAll);
+      testTelegramButton.addEventListener("click", testTelegram);
+
+      refreshAll();
+      setInterval(refreshAll, 15000);
     </script>
   </body>
 </html>
-

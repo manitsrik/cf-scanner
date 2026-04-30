@@ -23,8 +23,14 @@ class FuturesScanner:
         self.alerter = alerter
         self._candles: dict[tuple[str, str], pd.DataFrame] = {}
         self._stop_event = asyncio.Event()
+        self._started_at: datetime | None = None
+        self._initial_load_completed_at: datetime | None = None
+        self._last_message_at: datetime | None = None
+        self._last_error: str | None = None
+        self._websocket_connected = False
 
     async def start(self) -> None:
+        self._started_at = datetime.now(timezone.utc)
         await self._load_initial_candles()
         await self._run_websocket_loop()
 
@@ -47,6 +53,7 @@ class FuturesScanner:
             symbol, timeframe, candles = result
             self._candles[(symbol, timeframe)] = candles
             self._detect_signal(symbol, timeframe)
+        self._initial_load_completed_at = datetime.now(timezone.utc)
 
     async def _fetch_klines(
         self, client: httpx.AsyncClient, symbol: str, timeframe: str
@@ -70,6 +77,8 @@ class FuturesScanner:
                 ws_url = f"{self.settings.binance_ws_url}?streams={streams}"
                 logger.info("Connecting to Binance websocket.")
                 async with websockets.connect(ws_url, ping_interval=20, ping_timeout=20) as websocket:
+                    self._websocket_connected = True
+                    self._last_error = None
                     backoff_seconds = 1
                     async for message in websocket:
                         if self._stop_event.is_set():
@@ -78,12 +87,17 @@ class FuturesScanner:
             except asyncio.CancelledError:
                 raise
             except Exception:
+                self._websocket_connected = False
+                self._last_error = f"Websocket connection failed. Reconnecting in {backoff_seconds} seconds."
                 logger.exception("Websocket connection failed. Reconnecting in %s seconds.", backoff_seconds)
                 await asyncio.sleep(backoff_seconds)
                 backoff_seconds = min(backoff_seconds * 2, 60)
+            finally:
+                self._websocket_connected = False
 
     async def _handle_ws_message(self, message: str) -> None:
         try:
+            self._last_message_at = datetime.now(timezone.utc)
             payload = json.loads(message)
             kline = payload["data"]["k"]
             if not kline["x"]:
@@ -106,7 +120,45 @@ class FuturesScanner:
                 logger.info("New %s signal for %s %s.", signal.signal_type, symbol, timeframe)
                 await self.alerter.send_signal(signal)
         except (KeyError, ValueError, TypeError, json.JSONDecodeError):
+            self._last_error = "Failed to parse websocket message."
             logger.exception("Failed to parse websocket message.")
+
+    def status(self) -> dict:
+        pairs = []
+        for symbol in self.settings.symbols:
+            for timeframe in self.settings.timeframes:
+                candles = self._candles.get((symbol, timeframe))
+                latest = None
+                count = 0
+                price = None
+                if candles is not None and not candles.empty:
+                    count = len(candles)
+                    latest_row = candles.iloc[-1]
+                    latest = latest_row["close_time"].to_pydatetime().isoformat()
+                    price = float(latest_row["close"])
+
+                pairs.append(
+                    {
+                        "symbol": symbol,
+                        "timeframe": timeframe,
+                        "candle_count": count,
+                        "last_closed_candle_at": latest,
+                        "last_close_price": price,
+                    }
+                )
+
+        return {
+            "running": self._started_at is not None and not self._stop_event.is_set(),
+            "websocket_connected": self._websocket_connected,
+            "telegram_enabled": self.alerter.enabled,
+            "started_at": self._started_at.isoformat() if self._started_at else None,
+            "initial_load_completed_at": self._initial_load_completed_at.isoformat()
+            if self._initial_load_completed_at
+            else None,
+            "last_message_at": self._last_message_at.isoformat() if self._last_message_at else None,
+            "last_error": self._last_error,
+            "pairs": pairs,
+        }
 
     def _upsert_candle(self, symbol: str, timeframe: str, row: dict) -> None:
         key = (symbol, timeframe)

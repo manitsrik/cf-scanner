@@ -42,7 +42,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
     allow_credentials=False,
-    allow_methods=["GET"],
+    allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
 app.mount("/static", StaticFiles(directory="static"), name="static")
@@ -66,3 +66,19 @@ async def signals() -> list[Signal]:
 @app.get("/symbols", response_model=SymbolInfo)
 async def symbols() -> SymbolInfo:
     return SymbolInfo(symbols=settings.symbols, timeframes=settings.timeframes)
+
+
+@app.get("/status")
+async def status() -> dict:
+    return scanner.status()
+
+
+@app.post("/telegram/test")
+async def test_telegram() -> dict[str, str]:
+    if not alerter.enabled:
+        return {"status": "disabled", "message": "Telegram environment variables are not configured."}
+
+    sent = await alerter.send_text("CF Scanner test alert: Telegram is connected.")
+    if not sent:
+        return {"status": "failed", "message": "Telegram API request failed."}
+    return {"status": "sent"}
