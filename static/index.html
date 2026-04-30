@@ -154,7 +154,7 @@
       .summary {
         display: grid;
         gap: 12px;
-        grid-template-columns: repeat(4, minmax(0, 1fr));
+        grid-template-columns: repeat(5, minmax(0, 1fr));
         margin-bottom: 20px;
       }
 
@@ -439,6 +439,10 @@
           <span class="metric-value" id="watchlistState">Loading</span>
         </div>
         <div class="metric">
+          <span class="metric-label">Near Setups</span>
+          <span class="metric-value" id="nearSetupState">Loading</span>
+        </div>
+        <div class="metric">
           <span class="metric-label">Last Message</span>
           <span class="metric-value" id="lastMessage">Waiting</span>
         </div>
@@ -453,6 +457,51 @@
         <div class="metric">
           <span class="metric-label">Last Error</span>
           <span class="metric-value" id="lastError">None</span>
+        </div>
+        <div class="metric">
+          <span class="metric-label">Cooldown</span>
+          <span class="metric-value" id="cooldownState">Loading</span>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="section-head">
+          <h2>Near Setups</h2>
+          <div class="section-note">Markets close to a valid signal but not crossed yet</div>
+        </div>
+        <div class="filters">
+          <input id="nearSearch" type="search" placeholder="Search near setup symbol..." />
+          <select id="nearTypeFilter">
+            <option value="all">All setups</option>
+            <option value="LONG">LONG setup</option>
+            <option value="SHORT">SHORT setup</option>
+          </select>
+          <select id="nearTimeframeFilter">
+            <option value="all">All timeframes</option>
+            <option value="15m">15m</option>
+            <option value="30m">30m</option>
+          </select>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Symbol</th>
+                <th>Timeframe</th>
+                <th>Setup</th>
+                <th>Price</th>
+                <th>RSI</th>
+                <th>Volume</th>
+                <th>EMA Gap</th>
+                <th>TradingView</th>
+              </tr>
+            </thead>
+            <tbody id="nearSetups">
+              <tr>
+                <td class="empty" colspan="8">Loading near setups...</td>
+              </tr>
+            </tbody>
+          </table>
         </div>
       </section>
 
@@ -537,11 +586,14 @@
       const scannerStateEl = document.getElementById("scannerState");
       const websocketStateEl = document.getElementById("websocketState");
       const telegramStateEl = document.getElementById("telegramState");
+      const nearSetupStateEl = document.getElementById("nearSetupState");
       const lastMessageEl = document.getElementById("lastMessage");
       const lastRestRefreshEl = document.getElementById("lastRestRefresh");
       const lastErrorEl = document.getElementById("lastError");
+      const cooldownStateEl = document.getElementById("cooldownState");
       const watchlistStateEl = document.getElementById("watchlistState");
       const watchlistUpdatedEl = document.getElementById("watchlistUpdated");
+      const nearSetupsEl = document.getElementById("nearSetups");
       const scannerPairsEl = document.getElementById("scannerPairs");
       const refreshButton = document.getElementById("refreshButton");
       const themeButton = document.getElementById("themeButton");
@@ -549,9 +601,13 @@
       const signalSearch = document.getElementById("signalSearch");
       const signalTypeFilter = document.getElementById("signalTypeFilter");
       const signalTimeframeFilter = document.getElementById("signalTimeframeFilter");
+      const nearSearch = document.getElementById("nearSearch");
+      const nearTypeFilter = document.getElementById("nearTypeFilter");
+      const nearTimeframeFilter = document.getElementById("nearTimeframeFilter");
       const watchlistSearch = document.getElementById("watchlistSearch");
       const watchlistTimeframeFilter = document.getElementById("watchlistTimeframeFilter");
       let currentSignals = [];
+      let currentNearSetups = [];
       let currentPairs = [];
 
       function applyTheme(theme) {
@@ -678,6 +734,40 @@
           .join("");
       }
 
+      function renderNearSetups() {
+        const query = nearSearch.value;
+        const setupType = nearTypeFilter.value;
+        const timeframe = nearTimeframeFilter.value;
+        const setups = currentNearSetups.filter(
+          (setup) =>
+            matchesText(setup.symbol, query) &&
+            (setupType === "all" || setup.setup_type === setupType) &&
+            (timeframe === "all" || setup.timeframe === timeframe)
+        );
+
+        if (!setups.length) {
+          nearSetupsEl.innerHTML = '<tr><td class="empty" colspan="8">No near setups match your filters.</td></tr>';
+          return;
+        }
+
+        nearSetupsEl.innerHTML = setups
+          .map(
+            (setup) => `
+              <tr>
+                <td>${coinCell(setup.symbol)}</td>
+                <td>${setup.timeframe}</td>
+                <td><span class="badge ${setup.setup_type}">${setup.setup_type}</span></td>
+                <td>${formatPrice(setup.price)}</td>
+                <td>${Number(setup.rsi).toFixed(2)}</td>
+                <td>${Number(setup.volume_ratio).toFixed(2)}x avg20</td>
+                <td>${Number(setup.ema_gap_pct).toFixed(3)}%</td>
+                <td><a href="${setup.tradingview_url}" target="_blank" rel="noreferrer">Open chart</a></td>
+              </tr>
+            `
+          )
+          .join("");
+      }
+
       async function loadStatus() {
         const response = await fetch("/status");
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -686,13 +776,19 @@
         scannerStateEl.textContent = status.running ? "Running" : "Stopped";
         websocketStateEl.textContent = status.websocket_connected ? "Connected" : "Connecting";
         telegramStateEl.textContent = status.telegram_enabled ? "Enabled" : "Disabled";
+        nearSetupStateEl.textContent = `${(status.near_setups || []).length} setup${
+          (status.near_setups || []).length === 1 ? "" : "s"
+        }`;
         lastMessageEl.textContent = formatTime(status.last_message_at);
         lastRestRefreshEl.textContent = formatTime(status.last_rest_refresh_at);
         lastErrorEl.textContent = status.last_error || "None";
+        cooldownStateEl.textContent = `${status.signal_cooldown_minutes || 0} min`;
         watchlistStateEl.textContent = `${status.auto_watchlist_enabled ? "Auto" : "Fixed"} - ${
           status.watchlist_size
         } symbols`;
         watchlistUpdatedEl.textContent = formatTime(status.watchlist_updated_at);
+        currentNearSetups = status.near_setups || [];
+        renderNearSetups();
 
         currentPairs = status.pairs;
         if (!currentPairs.length) {
@@ -748,6 +844,9 @@
       signalSearch.addEventListener("input", renderSignals);
       signalTypeFilter.addEventListener("change", renderSignals);
       signalTimeframeFilter.addEventListener("change", renderSignals);
+      nearSearch.addEventListener("input", renderNearSetups);
+      nearTypeFilter.addEventListener("change", renderNearSetups);
+      nearTimeframeFilter.addEventListener("change", renderNearSetups);
       watchlistSearch.addEventListener("input", renderPairs);
       watchlistTimeframeFilter.addEventListener("change", renderPairs);
 

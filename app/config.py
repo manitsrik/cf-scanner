@@ -20,6 +20,9 @@ class Settings(BaseSettings):
     telegram_bot_token: str | None = None
     telegram_chat_id: str | None = None
     signal_limit: int = 100
+    signal_cooldown_minutes: int = 120
+    near_cross_threshold_pct: float = 0.15
+    near_volume_ratio_min: float = 0.8
     dashboard_password: str | None = None
     session_secret: str = Field(default_factory=lambda: secrets.token_urlsafe(32))
     session_cookie_name: str = "cf_scanner_session"

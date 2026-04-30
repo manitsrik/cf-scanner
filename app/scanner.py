@@ -63,7 +63,7 @@ class FuturesScanner:
             symbol, timeframe, candles = result
             self._candles[(symbol, timeframe)] = candles
             signal = self._detect_signal(symbol, timeframe)
-            if signal and self.store.add_if_new(signal):
+            if signal and self.store.add_if_new(signal, self.settings.signal_cooldown_minutes):
                 logger.info("New %s signal for %s %s from REST refresh.", signal.signal_type, symbol, timeframe)
                 await self.alerter.send_signal(signal)
         self._initial_load_completed_at = datetime.now(timezone.utc)
@@ -184,7 +184,7 @@ class FuturesScanner:
             }
             self._upsert_candle(symbol, timeframe, row)
             signal = self._detect_signal(symbol, timeframe)
-            if signal and self.store.add_if_new(signal):
+            if signal and self.store.add_if_new(signal, self.settings.signal_cooldown_minutes):
                 logger.info("New %s signal for %s %s.", signal.signal_type, symbol, timeframe)
                 await self.alerter.send_signal(signal)
         except (KeyError, ValueError, TypeError, json.JSONDecodeError):
@@ -193,17 +193,25 @@ class FuturesScanner:
 
     def status(self) -> dict:
         pairs = []
+        near_setups = []
         for symbol in self._active_symbols:
             for timeframe in self.settings.timeframes:
                 candles = self._candles.get((symbol, timeframe))
                 latest = None
                 count = 0
                 price = None
+                indicators = None
+                near_setup = None
                 if candles is not None and not candles.empty:
                     count = len(candles)
                     latest_row = candles.iloc[-1]
                     latest = latest_row["close_time"].to_pydatetime().isoformat()
                     price = float(latest_row["close"])
+                    indicators = self._indicator_snapshot(candles)
+                    if indicators:
+                        near_setup = self._near_setup(symbol, timeframe, indicators)
+                        if near_setup:
+                            near_setups.append(near_setup)
 
                 pairs.append(
                     {
@@ -212,6 +220,8 @@ class FuturesScanner:
                         "candle_count": count,
                         "last_closed_candle_at": latest,
                         "last_close_price": price,
+                        "indicators": indicators,
+                        "near_setup": near_setup["setup_type"] if near_setup else None,
                     }
                 )
 
@@ -230,6 +240,8 @@ class FuturesScanner:
             "last_rest_refresh_at": self._last_rest_refresh_at.isoformat() if self._last_rest_refresh_at else None,
             "watchlist_updated_at": self._watchlist_updated_at.isoformat() if self._watchlist_updated_at else None,
             "last_error": self._last_error,
+            "signal_cooldown_minutes": self.settings.signal_cooldown_minutes,
+            "near_setups": near_setups,
             "pairs": pairs,
         }
 
@@ -328,6 +340,64 @@ class FuturesScanner:
             created_at=datetime.now(timezone.utc),
             tradingview_url=f"https://www.tradingview.com/chart/?symbol=BINANCE:{symbol}.P",
         )
+
+    def _indicator_snapshot(self, candles: pd.DataFrame) -> dict | None:
+        if len(candles) < 200:
+            return None
+
+        df = add_indicators(candles)
+        latest = df.iloc[-1]
+        required = ["ema_9", "ema_21", "ema_200", "rsi_14", "volume_avg_20"]
+        if latest[required].isna().any():
+            return None
+
+        price = float(latest["close"])
+        volume = float(latest["volume"])
+        volume_average = float(latest["volume_avg_20"])
+        ema_9 = float(latest["ema_9"])
+        ema_21 = float(latest["ema_21"])
+        ema_gap_pct = abs(ema_9 - ema_21) / price * 100 if price > 0 else 0
+        volume_ratio = volume / volume_average if volume_average > 0 else 0
+        return {
+            "price": price,
+            "ema_9": ema_9,
+            "ema_21": ema_21,
+            "ema_200": float(latest["ema_200"]),
+            "rsi_14": float(latest["rsi_14"]),
+            "volume_ratio": volume_ratio,
+            "ema_gap_pct": ema_gap_pct,
+        }
+
+    def _near_setup(self, symbol: str, timeframe: str, indicators: dict) -> dict | None:
+        price = indicators["price"]
+        ema_9 = indicators["ema_9"]
+        ema_21 = indicators["ema_21"]
+        ema_200 = indicators["ema_200"]
+        rsi = indicators["rsi_14"]
+        volume_ratio = indicators["volume_ratio"]
+        ema_gap_pct = indicators["ema_gap_pct"]
+        close_enough = ema_gap_pct <= self.settings.near_cross_threshold_pct
+        enough_volume = volume_ratio >= self.settings.near_volume_ratio_min
+
+        setup_type = None
+        if price > ema_200 and ema_9 <= ema_21 and rsi >= 48 and close_enough and enough_volume:
+            setup_type = "LONG"
+        elif price < ema_200 and ema_9 >= ema_21 and rsi <= 52 and close_enough and enough_volume:
+            setup_type = "SHORT"
+
+        if not setup_type:
+            return None
+
+        return {
+            "symbol": symbol,
+            "timeframe": timeframe,
+            "setup_type": setup_type,
+            "price": price,
+            "rsi": rsi,
+            "volume_ratio": volume_ratio,
+            "ema_gap_pct": ema_gap_pct,
+            "tradingview_url": f"https://www.tradingview.com/chart/?symbol=BINANCE:{symbol}.P",
+        }
 
     @staticmethod
     def _klines_to_dataframe(klines: list[list]) -> pd.DataFrame:

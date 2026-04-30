@@ -16,6 +16,7 @@ This app does not place trades, does not use private Binance API keys, and does 
 - Telegram alert for each new signal
 - Simple HTML dashboard
 - Signal reason details and dashboard filters
+- Signal cooldown and near-setup monitoring
 - Docker-ready deployment
 
 ## Signal Rules
@@ -60,6 +61,9 @@ TELEGRAM_CHAT_ID=your_chat_id
 AUTO_WATCHLIST_ENABLED=true
 AUTO_WATCHLIST_SIZE=20
 WATCHLIST_REFRESH_SECONDS=900
+SIGNAL_COOLDOWN_MINUTES=120
+NEAR_CROSS_THRESHOLD_PCT=0.15
+NEAR_VOLUME_RATIO_MIN=0.8
 DASHBOARD_PASSWORD=choose_a_private_password
 SESSION_SECRET=change_me_to_a_long_random_string
 SESSION_COOKIE_SECURE=true
@@ -137,6 +141,9 @@ Do not commit `.env`. Use `.env.example` as the template.
 - `AUTO_WATCHLIST_ENABLED`
 - `AUTO_WATCHLIST_SIZE`
 - `WATCHLIST_REFRESH_SECONDS`
+- `SIGNAL_COOLDOWN_MINUTES`
+- `NEAR_CROSS_THRESHOLD_PCT`
+- `NEAR_VOLUME_RATIO_MIN`
 - `DASHBOARD_PASSWORD`
 - `SESSION_SECRET`
 
