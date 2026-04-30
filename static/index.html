@@ -72,7 +72,7 @@
       .summary {
         display: grid;
         gap: 12px;
-        grid-template-columns: repeat(4, minmax(0, 1fr));
+        grid-template-columns: repeat(6, minmax(0, 1fr));
         margin-bottom: 18px;
       }
 
@@ -217,6 +217,14 @@
           <span class="metric-label">Last Message</span>
           <span class="metric-value" id="lastMessage">Waiting</span>
         </div>
+        <div class="metric">
+          <span class="metric-label">REST Refresh</span>
+          <span class="metric-value" id="lastRestRefresh">Waiting</span>
+        </div>
+        <div class="metric">
+          <span class="metric-label">Last Error</span>
+          <span class="metric-value" id="lastError">None</span>
+        </div>
       </section>
 
       <div class="table-wrap">
@@ -268,6 +276,8 @@
       const websocketStateEl = document.getElementById("websocketState");
       const telegramStateEl = document.getElementById("telegramState");
       const lastMessageEl = document.getElementById("lastMessage");
+      const lastRestRefreshEl = document.getElementById("lastRestRefresh");
+      const lastErrorEl = document.getElementById("lastError");
       const scannerPairsEl = document.getElementById("scannerPairs");
       const refreshButton = document.getElementById("refreshButton");
       const testTelegramButton = document.getElementById("testTelegramButton");
@@ -291,6 +301,8 @@
         websocketStateEl.textContent = status.websocket_connected ? "Connected" : "Connecting";
         telegramStateEl.textContent = status.telegram_enabled ? "Enabled" : "Disabled";
         lastMessageEl.textContent = formatTime(status.last_message_at);
+        lastRestRefreshEl.textContent = formatTime(status.last_rest_refresh_at);
+        lastErrorEl.textContent = status.last_error || "None";
 
         if (!status.pairs.length) {
           scannerPairsEl.innerHTML = '<tr><td class="empty" colspan="5">No scanner pairs configured.</td></tr>';

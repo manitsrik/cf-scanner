@@ -26,16 +26,21 @@ class FuturesScanner:
         self._started_at: datetime | None = None
         self._initial_load_completed_at: datetime | None = None
         self._last_message_at: datetime | None = None
+        self._last_rest_refresh_at: datetime | None = None
         self._last_error: str | None = None
         self._websocket_connected = False
 
     async def start(self) -> None:
         self._started_at = datetime.now(timezone.utc)
-        await self._load_initial_candles()
-        await self._run_websocket_loop()
+        await asyncio.gather(self._refresh_candles_loop(), self._run_websocket_loop())
 
     async def stop(self) -> None:
         self._stop_event.set()
+
+    async def _refresh_candles_loop(self) -> None:
+        while not self._stop_event.is_set():
+            await self._load_initial_candles()
+            await asyncio.sleep(60)
 
     async def _load_initial_candles(self) -> None:
         async with httpx.AsyncClient(base_url=self.settings.binance_rest_url, timeout=15) as client:
@@ -48,12 +53,17 @@ class FuturesScanner:
 
         for result in results:
             if isinstance(result, Exception):
+                self._last_error = f"Initial candle load failed: {result}"
                 logger.error("Initial candle load failed: %s", result)
                 continue
             symbol, timeframe, candles = result
             self._candles[(symbol, timeframe)] = candles
-            self._detect_signal(symbol, timeframe)
+            signal = self._detect_signal(symbol, timeframe)
+            if signal and self.store.add_if_new(signal):
+                logger.info("New %s signal for %s %s from REST refresh.", signal.signal_type, symbol, timeframe)
+                await self.alerter.send_signal(signal)
         self._initial_load_completed_at = datetime.now(timezone.utc)
+        self._last_rest_refresh_at = self._initial_load_completed_at
 
     async def _fetch_klines(
         self, client: httpx.AsyncClient, symbol: str, timeframe: str
@@ -156,6 +166,7 @@ class FuturesScanner:
             if self._initial_load_completed_at
             else None,
             "last_message_at": self._last_message_at.isoformat() if self._last_message_at else None,
+            "last_rest_refresh_at": self._last_rest_refresh_at.isoformat() if self._last_rest_refresh_at else None,
             "last_error": self._last_error,
             "pairs": pairs,
         }
