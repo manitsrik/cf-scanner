@@ -9,7 +9,7 @@ This app does not place trades, does not use private Binance API keys, and does 
 - Binance USDT Futures public kline data
 - Auto watchlist: top USDT perpetual futures by 24h quote volume
 - Fallback symbols: `BTCUSDT`, `ETHUSDT`, `SOLUSDT`, `BNBUSDT`
-- Timeframes: `15m`, `30m`
+- Timeframes: `15m`, `30m`, `1h`
 - Indicators: EMA 9, EMA 21, EMA 200, RSI 14, volume average 20
 - LONG and SHORT signal detection
 - In-memory latest signal storage
