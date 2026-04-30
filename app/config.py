@@ -1,4 +1,6 @@
 from functools import lru_cache
+import secrets
+
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -18,6 +20,10 @@ class Settings(BaseSettings):
     telegram_bot_token: str | None = None
     telegram_chat_id: str | None = None
     signal_limit: int = 100
+    dashboard_password: str | None = None
+    session_secret: str = Field(default_factory=lambda: secrets.token_urlsafe(32))
+    session_cookie_name: str = "cf_scanner_session"
+    session_cookie_secure: bool = True
 
 
 @lru_cache

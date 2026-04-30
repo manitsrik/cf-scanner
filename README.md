@@ -59,6 +59,9 @@ TELEGRAM_CHAT_ID=your_chat_id
 AUTO_WATCHLIST_ENABLED=true
 AUTO_WATCHLIST_SIZE=20
 WATCHLIST_REFRESH_SECONDS=900
+DASHBOARD_PASSWORD=choose_a_private_password
+SESSION_SECRET=change_me_to_a_long_random_string
+SESSION_COOKIE_SECURE=true
 ```
 
 Run locally:
@@ -84,6 +87,12 @@ http://localhost:8000
 `/status` shows scanner runtime state, websocket state, Telegram status, and latest closed candle time for every configured symbol/timeframe.
 
 `/telegram/test` sends a test Telegram message when `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` are configured.
+
+## Dashboard Login
+
+Set `DASHBOARD_PASSWORD` to require login for the dashboard and scanner APIs. Set `SESSION_SECRET` to a long random string so login cookies stay valid across redeploys.
+
+`GET /health` remains public for uptime checks.
 
 ## Watchlist
 
@@ -127,6 +136,8 @@ Do not commit `.env`. Use `.env.example` as the template.
 - `AUTO_WATCHLIST_ENABLED`
 - `AUTO_WATCHLIST_SIZE`
 - `WATCHLIST_REFRESH_SECONDS`
+- `DASHBOARD_PASSWORD`
+- `SESSION_SECRET`
 
 Railway provides `PORT` automatically. The Dockerfile uses that value and falls back to `8000` locally.
 

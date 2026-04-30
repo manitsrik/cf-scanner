@@ -3,11 +3,12 @@ import logging
 from contextlib import suppress
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI, Form, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
+from app.auth import ApiAuth, create_session_token, redirect_to_dashboard, require_page_auth, verify_password
 from app.config import get_settings
 from app.models import Signal, SymbolInfo
 from app.scanner import FuturesScanner
@@ -49,8 +50,39 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 
 
 @app.get("/", include_in_schema=False)
-async def dashboard() -> FileResponse:
+async def dashboard(_: None = Depends(require_page_auth)) -> FileResponse:
     return FileResponse("static/index.html")
+
+
+@app.get("/login", include_in_schema=False)
+async def login_page(request: Request):
+    if verify_password("") and not settings.dashboard_password:
+        return redirect_to_dashboard()
+    return FileResponse("static/login.html")
+
+
+@app.post("/login", include_in_schema=False)
+async def login(password: str = Form(...)) -> RedirectResponse:
+    if not verify_password(password):
+        return RedirectResponse("/login?error=1", status_code=303)
+
+    response = redirect_to_dashboard()
+    response.set_cookie(
+        key=settings.session_cookie_name,
+        value=create_session_token(),
+        max_age=60 * 60 * 24 * 7,
+        httponly=True,
+        secure=settings.session_cookie_secure,
+        samesite="lax",
+    )
+    return response
+
+
+@app.post("/logout", include_in_schema=False)
+async def logout() -> RedirectResponse:
+    response = RedirectResponse("/login", status_code=303)
+    response.delete_cookie(settings.session_cookie_name)
+    return response
 
 
 @app.get("/health")
@@ -59,22 +91,22 @@ async def health() -> dict[str, str]:
 
 
 @app.get("/signals", response_model=list[Signal])
-async def signals() -> list[Signal]:
+async def signals(_: None = ApiAuth) -> list[Signal]:
     return store.list()
 
 
 @app.get("/symbols", response_model=SymbolInfo)
-async def symbols() -> SymbolInfo:
+async def symbols(_: None = ApiAuth) -> SymbolInfo:
     return SymbolInfo(symbols=scanner.symbols(), timeframes=settings.timeframes)
 
 
 @app.get("/status")
-async def status() -> dict:
+async def status(_: None = ApiAuth) -> dict:
     return scanner.status()
 
 
 @app.post("/telegram/test")
-async def test_telegram() -> dict[str, str]:
+async def test_telegram(_: None = ApiAuth) -> dict[str, str]:
     if not alerter.enabled:
         return {"status": "disabled", "message": "Telegram environment variables are not configured."}
 

@@ -6,4 +6,4 @@ pandas==2.2.3
 ta==0.11.0
 python-dotenv==1.0.1
 pydantic-settings==2.7.1
-
+python-multipart==0.0.20
