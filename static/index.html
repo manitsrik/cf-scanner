@@ -271,6 +271,36 @@
         font-weight: 800;
       }
 
+      .coin-cell {
+        align-items: center;
+        display: inline-flex;
+        gap: 10px;
+      }
+
+      .coin-icon,
+      .coin-fallback {
+        border-radius: 999px;
+        flex: 0 0 auto;
+        height: 26px;
+        width: 26px;
+      }
+
+      .coin-icon {
+        background: var(--surface-muted);
+        display: block;
+      }
+
+      .coin-fallback {
+        align-items: center;
+        background: var(--primary-soft);
+        border: 1px solid var(--primary-border);
+        color: var(--primary);
+        display: none;
+        font-size: 10px;
+        font-weight: 850;
+        justify-content: center;
+      }
+
       .muted {
         color: var(--muted);
       }
@@ -475,6 +505,36 @@
         return new Date(value).toLocaleString();
       }
 
+      function escapeHtml(value) {
+        return String(value)
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;")
+          .replaceAll('"', "&quot;")
+          .replaceAll("'", "&#039;");
+      }
+
+      function assetCode(symbol) {
+        return String(symbol).replace(/USDT$/, "").replace(/^\d+/, "").toLowerCase();
+      }
+
+      function coinCell(symbol) {
+        const safeSymbol = escapeHtml(symbol);
+        const asset = assetCode(symbol);
+        const fallback = escapeHtml(asset.slice(0, 3).toUpperCase() || "?");
+        const iconUrl = `https://cdn.jsdelivr.net/gh/spothq/cryptocurrency-icons@master/svg/color/${encodeURIComponent(
+          asset
+        )}.svg`;
+        return `
+          <span class="coin-cell">
+            <img class="coin-icon" src="${iconUrl}" alt="" loading="lazy"
+              onerror="this.style.display='none'; this.nextElementSibling.style.display='inline-flex';" />
+            <span class="coin-fallback">${fallback}</span>
+            <span class="symbol">${safeSymbol}</span>
+          </span>
+        `;
+      }
+
       async function loadStatus() {
         const response = await fetch("/status");
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -500,7 +560,7 @@
           .map(
             (pair) => `
               <tr>
-                <td class="symbol">${pair.symbol}</td>
+                <td>${coinCell(pair.symbol)}</td>
                 <td>${pair.timeframe}</td>
                 <td>${pair.candle_count}</td>
                 <td class="muted">${formatTime(pair.last_closed_candle_at)}</td>
@@ -526,7 +586,7 @@
           .map(
             (signal) => `
               <tr>
-                <td class="symbol">${signal.symbol}</td>
+                <td>${coinCell(signal.symbol)}</td>
                 <td>${signal.timeframe}</td>
                 <td><span class="badge ${signal.signal_type}">${signal.signal_type}</span></td>
                 <td>${formatPrice(signal.price)}</td>
