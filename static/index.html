@@ -921,12 +921,34 @@
         return tradingViewScriptPromise;
       }
 
+      const emaStudies = [
+        { length: 9, color: "#2563eb", width: 2 },
+        { length: 21, color: "#f97316", width: 2 },
+        { length: 200, color: "#7c3aed", width: 2 },
+      ];
+
       function chartStudies() {
-        return [
-          { id: "MAExp@tv-basicstudies", inputs: { length: 9 } },
-          { id: "MAExp@tv-basicstudies", inputs: { length: 21 } },
-          { id: "MAExp@tv-basicstudies", inputs: { length: 200 } },
-        ];
+        return emaStudies.map((study) => ({
+          id: "MAExp@tv-basicstudies",
+          inputs: { length: study.length },
+        }));
+      }
+
+      function chartStudyOverrides() {
+        return {
+          "moving average exponential.0.plot.color": emaStudies[0].color,
+          "moving average exponential.0.plot.linewidth": emaStudies[0].width,
+          "moving average exponential.1.plot.color": emaStudies[1].color,
+          "moving average exponential.1.plot.linewidth": emaStudies[1].width,
+          "moving average exponential.2.plot.color": emaStudies[2].color,
+          "moving average exponential.2.plot.linewidth": emaStudies[2].width,
+          "moving average exponential.plot.color": emaStudies[0].color,
+          "moving average exponential.plot.linewidth": emaStudies[0].width,
+          "moving average exponential_1.plot.color": emaStudies[1].color,
+          "moving average exponential_1.plot.linewidth": emaStudies[1].width,
+          "moving average exponential_2.plot.color": emaStudies[2].color,
+          "moving average exponential_2.plot.linewidth": emaStudies[2].width,
+        };
       }
 
       async function setChart(symbol, timeframe) {
@@ -958,14 +980,7 @@
             allow_symbol_change: true,
             save_image: false,
             studies: chartStudies(),
-            studies_overrides: {
-              "moving average exponential.plot.color": "#2563eb",
-              "moving average exponential.plot.linewidth": 2,
-              "moving average exponential_1.plot.color": "#f59e0b",
-              "moving average exponential_1.plot.linewidth": 2,
-              "moving average exponential_2.plot.color": "#ef4444",
-              "moving average exponential_2.plot.linewidth": 2,
-            },
+            studies_overrides: chartStudyOverrides(),
             container_id: containerId,
           });
           chartFrame.querySelector(".chart-loading")?.remove();
