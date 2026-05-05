@@ -934,24 +934,12 @@
       }
 
       function chartStudies() {
-        return [
+        const emaStudies = [
           { id: "MAExp@tv-basicstudies", inputs: { length: 9 } },
           { id: "MAExp@tv-basicstudies", inputs: { length: 21 } },
           { id: "MAExp@tv-basicstudies", inputs: { length: 200 } },
         ];
-      }
-
-      function addTradingViewStudies(widget) {
-        if (!widget?.onChartReady || !widget?.chart) return;
-
-        widget.onChartReady(() => {
-          const chart = widget.chart();
-          if (!chart?.createStudy) return;
-          if (currentIndicatorMode === "full") {
-            chart.createStudy("Relative Strength Index", false, false, { length: 14 });
-            chart.createStudy("MACD", false, false, { fastLength: 12, slowLength: 26, signalSmoothing: 9 });
-          }
-        });
+        return currentIndicatorMode === "full" ? [...emaStudies, "STD;RSI", "STD;MACD"] : emaStudies;
       }
 
       function updateIndicatorModeButtons() {
@@ -983,7 +971,7 @@
 
         try {
           await loadTradingViewScript();
-          const widget = new window.TradingView.widget({
+          new window.TradingView.widget({
             autosize: true,
             symbol: `BINANCE:${symbol}.P`,
             interval: tradingViewInterval(timeframe),
@@ -1007,7 +995,6 @@
             },
             container_id: containerId,
           });
-          addTradingViewStudies(widget);
           chartFrame.querySelector(".chart-loading")?.remove();
         } catch (error) {
           chartFrame.innerHTML = '<div class="chart-loading">TradingView chart could not be loaded.</div>';
