@@ -92,7 +92,6 @@ http://localhost:8000
 
 - `GET /health`
 - `GET /signals`
-- `GET /indicators`
 - `GET /symbols`
 - `GET /status`
 - `POST /telegram/test`
@@ -100,8 +99,6 @@ http://localhost:8000
 `/status` shows scanner runtime state, websocket state, Telegram status, market-data freshness, stale pair counts, latest system events, and latest closed candle time for every configured symbol/timeframe.
 
 `/health` stays public for uptime checks and returns a compact health summary with running state, market-data status, websocket state, loaded pair counts, stale pair counts, and the latest error.
-
-`/indicators?symbol=BTCUSDT&timeframe=15m` returns recent RSI and MACD series used by the compact dashboard indicator panels.
 
 `/telegram/test` sends a test Telegram message when `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` are configured.
 
