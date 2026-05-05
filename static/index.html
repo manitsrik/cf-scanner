@@ -900,6 +900,7 @@
           allow_symbol_change: "1",
           save_image: "0",
         });
+        ["STD;EMA", "STD;RSI", "STD;MACD"].forEach((study) => params.append("studies", study));
         return `https://s.tradingview.com/widgetembed/?${params.toString()}`;
       }
 
