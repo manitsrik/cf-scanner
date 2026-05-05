@@ -195,6 +195,41 @@
         overflow-wrap: anywhere;
       }
 
+      .state-ok,
+      .state-warn,
+      .state-error,
+      .state-muted {
+        border-radius: 999px;
+        display: inline-flex;
+        padding: 3px 8px;
+        width: fit-content;
+      }
+
+      .state-ok {
+        background: var(--long-bg);
+        color: var(--long-text);
+      }
+
+      .state-warn {
+        background: #fef3c7;
+        color: #92400e;
+      }
+
+      .state-error {
+        background: var(--short-bg);
+        color: var(--short-text);
+      }
+
+      .state-muted {
+        background: var(--surface-muted);
+        color: var(--muted);
+      }
+
+      [data-theme="dark"] .state-warn {
+        background: #422006;
+        color: #fde68a;
+      }
+
       .section {
         margin-bottom: 16px;
       }
@@ -376,6 +411,22 @@
 
       .detail-list div {
         max-width: 520px;
+      }
+
+      .event-level {
+        border-radius: 999px;
+        display: inline-flex;
+        font-size: 11px;
+        font-weight: 850;
+        justify-content: center;
+        min-width: 62px;
+        padding: 4px 8px;
+        text-transform: uppercase;
+      }
+
+      .log-message {
+        min-width: 360px;
+        white-space: normal;
       }
 
       .chart-panel {
@@ -580,6 +631,29 @@
 
       <section class="section">
         <div class="section-head">
+          <h2>System Log</h2>
+          <div class="section-note">Latest scanner events, reconnects, and market-data issues</div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Time</th>
+                <th>Level</th>
+                <th>Message</th>
+              </tr>
+            </thead>
+            <tbody id="systemLog">
+              <tr>
+                <td class="empty" colspan="3">Waiting for system events...</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="section-head">
           <h2>Near Setups</h2>
           <div class="section-note">Markets close to a valid signal but not crossed yet</div>
         </div>
@@ -728,6 +802,7 @@
       const latestCandleStateEl = document.getElementById("latestCandleState");
       const watchlistStateEl = document.getElementById("watchlistState");
       const watchlistUpdatedEl = document.getElementById("watchlistUpdated");
+      const systemLogEl = document.getElementById("systemLog");
       const nearSetupsEl = document.getElementById("nearSetups");
       const scannerPairsEl = document.getElementById("scannerPairs");
       const refreshButton = document.getElementById("refreshButton");
@@ -847,6 +922,19 @@
 
       function matchesText(symbol, query) {
         return symbol.toLowerCase().includes(query.trim().toLowerCase());
+      }
+
+      function setStateValue(element, text, state) {
+        element.textContent = text;
+        element.classList.remove("state-ok", "state-warn", "state-error", "state-muted");
+        element.classList.add(`state-${state}`);
+      }
+
+      function eventLevelClass(level) {
+        if (level === "error") return "state-error";
+        if (level === "warning") return "state-warn";
+        if (level === "info") return "state-ok";
+        return "state-muted";
       }
 
       function matchesSignalAge(signal, ageFilter) {
@@ -981,31 +1069,68 @@
           .join("");
       }
 
+      function renderSystemLog(events) {
+        if (!events.length) {
+          systemLogEl.innerHTML = '<tr><td class="empty" colspan="3">Waiting for system events...</td></tr>';
+          return;
+        }
+
+        systemLogEl.innerHTML = events
+          .slice(0, 8)
+          .map(
+            (event) => `
+              <tr>
+                <td class="muted">${formatTime(event.created_at)}</td>
+                <td><span class="event-level ${eventLevelClass(event.level)}">${escapeHtml(event.level)}</span></td>
+                <td class="log-message">${escapeHtml(event.message)}</td>
+              </tr>
+            `
+          )
+          .join("");
+      }
+
       async function loadStatus() {
         const response = await fetch("/status");
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const status = await response.json();
 
-        scannerStateEl.textContent = status.running ? "Running" : "Stopped";
-        websocketStateEl.textContent = status.websocket_connected ? "Connected" : "Connecting";
-        telegramStateEl.textContent = status.telegram_enabled ? "Enabled" : "Disabled";
-        nearSetupStateEl.textContent = `${(status.near_setups || []).length} setup${
-          (status.near_setups || []).length === 1 ? "" : "s"
-        }`;
+        setStateValue(scannerStateEl, status.running ? "Running" : "Stopped", status.running ? "ok" : "error");
+        setStateValue(
+          websocketStateEl,
+          status.websocket_connected ? "Connected" : "Connecting",
+          status.websocket_connected ? "ok" : "warn"
+        );
+        setStateValue(telegramStateEl, status.telegram_enabled ? "Enabled" : "Disabled", status.telegram_enabled ? "ok" : "muted");
+        const nearSetupCount = (status.near_setups || []).length;
+        setStateValue(
+          nearSetupStateEl,
+          `${nearSetupCount} setup${nearSetupCount === 1 ? "" : "s"}`,
+          nearSetupCount > 0 ? "warn" : "muted"
+        );
         lastMessageEl.textContent = formatTime(status.last_message_at);
         lastRestRefreshEl.textContent = formatTime(status.last_rest_refresh_at);
-        lastErrorEl.textContent = status.last_error || "None";
+        setStateValue(lastErrorEl, status.last_error || "None", status.last_error ? "error" : "ok");
         cooldownStateEl.textContent = `${status.signal_cooldown_minutes || 0} min`;
-        marketDataStateEl.textContent = `${status.market_data_status || "Unknown"} - ${
-          status.loaded_pair_count || 0
-        }/${status.total_pair_count || 0}`;
-        latestCandleStateEl.textContent = status.latest_closed_candle_at
-          ? `${formatTime(status.latest_closed_candle_at)} (${status.stale_pair_count || 0} stale)`
-          : "Waiting";
-        watchlistStateEl.textContent = `${status.auto_watchlist_enabled ? "Auto" : "Fixed"} - ${
-          status.watchlist_size
-        } symbols`;
+        const marketDataStatus = status.market_data_status || "Unknown";
+        setStateValue(
+          marketDataStateEl,
+          `${marketDataStatus} - ${status.loaded_pair_count || 0}/${status.total_pair_count || 0}`,
+          marketDataStatus === "OK" ? "ok" : marketDataStatus === "Error" ? "error" : "warn"
+        );
+        setStateValue(
+          latestCandleStateEl,
+          status.latest_closed_candle_at
+            ? `${formatTime(status.latest_closed_candle_at)} (${status.stale_pair_count || 0} stale)`
+            : "Waiting",
+          status.stale_pair_count > 0 ? "warn" : status.latest_closed_candle_at ? "ok" : "muted"
+        );
+        setStateValue(
+          watchlistStateEl,
+          `${status.auto_watchlist_enabled ? "Auto" : "Fixed"} - ${status.watchlist_size} symbols`,
+          "ok"
+        );
         watchlistUpdatedEl.textContent = formatTime(status.watchlist_updated_at);
+        renderSystemLog(status.events || []);
         currentNearSetups = status.near_setups || [];
         renderNearSetups();
 

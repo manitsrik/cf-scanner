@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+from collections import deque
 from datetime import datetime, timezone
 
 import httpx
@@ -52,11 +53,14 @@ class FuturesScanner:
         self._last_rest_refresh_at: datetime | None = None
         self._watchlist_updated_at: datetime | None = None
         self._last_error: str | None = None
+        self._events: deque[dict] = deque(maxlen=50)
+        self._last_alert_at: dict[str, datetime] = {}
         self._websocket_connected = False
         self._watchlist_version = 0
 
     async def start(self) -> None:
         self._started_at = datetime.now(timezone.utc)
+        self._record_event("info", "Scanner started.")
         await asyncio.gather(self._refresh_candles_loop(), self._run_websocket_loop())
 
     async def stop(self) -> None:
@@ -89,8 +93,12 @@ class FuturesScanner:
                 had_error = True
                 if isinstance(result, MarketDataError):
                     self._last_error = result.dashboard_message()
+                    self._record_event("error", self._last_error)
+                    await self._send_system_alert(f"market-data:{result.status_code}", self._last_error)
                 else:
                     self._last_error = f"Initial candle load failed: {result}"
+                    self._record_event("error", self._last_error)
+                    await self._send_system_alert("market-data:load-failed", self._last_error)
                 logger.error("Initial candle load failed: %s", result)
                 continue
             symbol, timeframe, candles = result
@@ -100,6 +108,8 @@ class FuturesScanner:
                 logger.info("New %s signal for %s %s from REST refresh.", signal.signal_type, symbol, timeframe)
                 await self.alerter.send_signal(signal)
         if not had_error:
+            if self._last_error:
+                self._record_event("info", "Binance REST candle refresh recovered.")
             self._last_error = None
         self._initial_load_completed_at = datetime.now(timezone.utc)
         self._last_rest_refresh_at = self._initial_load_completed_at
@@ -143,12 +153,15 @@ class FuturesScanner:
                 self._candles = {key: value for key, value in self._candles.items() if key in old_pairs}
                 self._active_symbols = symbols
                 self._watchlist_version += 1
+                self._record_event("info", f"Watchlist updated: {len(symbols)} symbols.")
                 logger.info("Updated auto watchlist: %s", ", ".join(symbols))
 
             self._watchlist_updated_at = datetime.now(timezone.utc)
             self._last_error = None
         except Exception as exc:
             self._last_error = f"Auto watchlist refresh failed: {exc}"
+            self._record_event("error", self._last_error)
+            await self._send_system_alert("watchlist:refresh-failed", self._last_error)
             logger.exception("Auto watchlist refresh failed.")
 
     async def _fetch_klines(
@@ -179,6 +192,7 @@ class FuturesScanner:
                 async with websockets.connect(ws_url, ping_interval=20, ping_timeout=20) as websocket:
                     self._websocket_connected = True
                     self._last_error = None
+                    self._record_event("info", "Binance websocket connected.")
                     backoff_seconds = 1
                     while not self._stop_event.is_set():
                         if websocket_version != self._watchlist_version:
@@ -189,12 +203,15 @@ class FuturesScanner:
                             break
                         await self._handle_ws_message(message)
             except TimeoutError:
+                self._record_event("warning", "Websocket receive timeout. Reconnecting.")
                 logger.info("Websocket receive timeout. Reconnecting.")
             except asyncio.CancelledError:
                 raise
             except Exception:
                 self._websocket_connected = False
                 self._last_error = f"Websocket connection failed. Reconnecting in {backoff_seconds} seconds."
+                self._record_event("error", self._last_error)
+                await self._send_system_alert("websocket:connection-failed", self._last_error)
                 logger.exception("Websocket connection failed. Reconnecting in %s seconds.", backoff_seconds)
                 await asyncio.sleep(backoff_seconds)
                 backoff_seconds = min(backoff_seconds * 2, 60)
@@ -227,6 +244,7 @@ class FuturesScanner:
                 await self.alerter.send_signal(signal)
         except (KeyError, ValueError, TypeError, json.JSONDecodeError):
             self._last_error = "Failed to parse websocket message."
+            self._record_event("warning", self._last_error)
             logger.exception("Failed to parse websocket message.")
 
     def status(self) -> dict:
@@ -306,6 +324,7 @@ class FuturesScanner:
             "loaded_pair_count": loaded_pair_count,
             "stale_pair_count": stale_pair_count,
             "latest_closed_candle_at": latest_closed_candle_at.isoformat() if latest_closed_candle_at else None,
+            "events": list(self._events),
             "near_setups": near_setups,
             "pairs": pairs,
         }
@@ -471,6 +490,28 @@ class FuturesScanner:
         if timeframe.endswith("h"):
             return int(timeframe.removesuffix("h")) * 60 * 60 * 3
         return 60 * 60 * 3
+
+    def _record_event(self, level: str, message: str) -> None:
+        self._events.appendleft(
+            {
+                "level": level,
+                "message": message,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            }
+        )
+
+    async def _send_system_alert(self, key: str, message: str) -> None:
+        if not self.alerter.enabled:
+            return
+
+        now = datetime.now(timezone.utc)
+        last_alert_at = self._last_alert_at.get(key)
+        cooldown_seconds = self.settings.system_alert_cooldown_minutes * 60
+        if last_alert_at and (now - last_alert_at).total_seconds() < cooldown_seconds:
+            return
+
+        self._last_alert_at[key] = now
+        await self.alerter.send_text(f"CF Scanner system alert\n{message}")
 
     @staticmethod
     def _klines_to_dataframe(klines: list[list]) -> pd.DataFrame:

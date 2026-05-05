@@ -24,6 +24,7 @@ class Settings(BaseSettings):
     signal_db_path: str = "data/signals.db"
     signal_limit: int = 100
     signal_cooldown_minutes: int = 120
+    system_alert_cooldown_minutes: int = 30
     near_cross_threshold_pct: float = 0.15
     near_volume_ratio_min: float = 0.8
     dashboard_password: str | None = None
