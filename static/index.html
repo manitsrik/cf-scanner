@@ -460,7 +460,7 @@
 
       .chart-frame {
         background: var(--surface-muted);
-        height: 620px;
+        height: 430px;
         width: 100%;
       }
 
@@ -488,6 +488,43 @@
         font-size: 14px;
         height: 100%;
         justify-content: center;
+      }
+
+      .indicator-panels {
+        background: var(--surface);
+        border-top: 1px solid var(--border-soft);
+        display: grid;
+        gap: 0;
+        grid-template-columns: 1fr;
+      }
+
+      .indicator-panels.hidden {
+        display: none;
+      }
+
+      .indicator-panel {
+        border-top: 1px solid var(--border-soft);
+        min-height: 86px;
+        padding: 8px 12px;
+      }
+
+      .indicator-panel:first-child {
+        border-top: 0;
+      }
+
+      .indicator-panel-head {
+        color: var(--muted);
+        display: flex;
+        font-size: 12px;
+        font-weight: 800;
+        justify-content: space-between;
+        margin-bottom: 4px;
+      }
+
+      .indicator-svg {
+        display: block;
+        height: 58px;
+        width: 100%;
       }
 
       .link-button {
@@ -553,11 +590,15 @@
         }
 
         .chart-frame {
-          height: 520px;
+          height: 360px;
         }
 
         .chart-frame.ema-only {
           height: 420px;
+        }
+
+        .indicator-panel {
+          min-height: 78px;
         }
       }
     </style>
@@ -600,6 +641,22 @@
             </div>
           </div>
           <div class="chart-frame" id="chartFrame"></div>
+          <div class="indicator-panels" id="indicatorPanels">
+            <div class="indicator-panel">
+              <div class="indicator-panel-head">
+                <span>RSI 14</span>
+                <span id="rsiValue">Waiting</span>
+              </div>
+              <svg class="indicator-svg" id="rsiChart" role="img" aria-label="RSI chart"></svg>
+            </div>
+            <div class="indicator-panel">
+              <div class="indicator-panel-head">
+                <span>MACD 12 26 9</span>
+                <span id="macdValue">Waiting</span>
+              </div>
+              <svg class="indicator-svg" id="macdChart" role="img" aria-label="MACD chart"></svg>
+            </div>
+          </div>
         </div>
       </section>
 
@@ -847,6 +904,11 @@
       const watchlistTimeframeFilter = document.getElementById("watchlistTimeframeFilter");
       const chartTitle = document.getElementById("chartTitle");
       const chartFrame = document.getElementById("chartFrame");
+      const indicatorPanels = document.getElementById("indicatorPanels");
+      const rsiChart = document.getElementById("rsiChart");
+      const rsiValue = document.getElementById("rsiValue");
+      const macdChart = document.getElementById("macdChart");
+      const macdValue = document.getElementById("macdValue");
       const chartOpenLink = document.getElementById("chartOpenLink");
       const chartEmaMode = document.getElementById("chartEmaMode");
       const chartFullMode = document.getElementById("chartFullMode");
@@ -941,23 +1003,11 @@
         ];
       }
 
-      function addTradingViewStudies(widget) {
-        if (!widget?.onChartReady || !widget?.chart) return;
-
-        widget.onChartReady(() => {
-          const chart = widget.chart();
-          if (!chart?.createStudy) return;
-          if (currentIndicatorMode === "full") {
-            chart.createStudy("Relative Strength Index", false, false, { length: 14 });
-            chart.createStudy("MACD", false, false, { fastLength: 12, slowLength: 26, signalSmoothing: 9 });
-          }
-        });
-      }
-
       function updateIndicatorModeButtons() {
         chartEmaMode.classList.toggle("secondary", currentIndicatorMode !== "ema");
         chartFullMode.classList.toggle("secondary", currentIndicatorMode !== "full");
         chartFrame.classList.toggle("ema-only", currentIndicatorMode === "ema");
+        indicatorPanels.classList.toggle("hidden", currentIndicatorMode !== "full");
       }
 
       function setIndicatorMode(mode) {
@@ -965,6 +1015,124 @@
         localStorage.setItem("cf-scanner-indicator-mode", mode);
         updateIndicatorModeButtons();
         setChart(currentChartSymbol, currentChartTimeframe);
+      }
+
+      function svgPoint(index, total, value, min, max, width, height) {
+        const x = total <= 1 ? 0 : (index / (total - 1)) * width;
+        const range = max - min || 1;
+        const y = height - ((value - min) / range) * height;
+        return `${x.toFixed(1)},${y.toFixed(1)}`;
+      }
+
+      function drawLineChart(svg, values, options = {}) {
+        const width = 1000;
+        const height = 58;
+        const cleanValues = values.filter((value) => value !== null && Number.isFinite(value));
+        if (cleanValues.length < 2) {
+          svg.innerHTML = '<text x="0" y="34" fill="#64748b" font-size="13">Waiting for data</text>';
+          return;
+        }
+
+        const min = options.min ?? Math.min(...cleanValues);
+        const max = options.max ?? Math.max(...cleanValues);
+        const points = values
+          .map((value, index) =>
+            value === null || !Number.isFinite(value) ? null : svgPoint(index, values.length, value, min, max, width, height)
+          )
+          .filter(Boolean)
+          .join(" ");
+        const guides = (options.guides || [])
+          .map((guide) => {
+            const y = height - ((guide.value - min) / (max - min || 1)) * height;
+            return `<line x1="0" x2="${width}" y1="${y.toFixed(1)}" y2="${y.toFixed(1)}" stroke="${guide.color}" stroke-dasharray="5 5" />`;
+          })
+          .join("");
+
+        svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+        svg.innerHTML = `${guides}<polyline points="${points}" fill="none" stroke="${options.color || "#2563eb"}" stroke-width="3" />`;
+      }
+
+      function drawMacdChart(svg, points) {
+        const width = 1000;
+        const height = 58;
+        const macd = points.map((point) => point.macd).filter((value) => value !== null && Number.isFinite(value));
+        const signal = points.map((point) => point.macd_signal).filter((value) => value !== null && Number.isFinite(value));
+        const diff = points.map((point) => point.macd_diff).filter((value) => value !== null && Number.isFinite(value));
+        const allValues = [...macd, ...signal, ...diff];
+        if (allValues.length < 2) {
+          svg.innerHTML = '<text x="0" y="34" fill="#64748b" font-size="13">Waiting for data</text>';
+          return;
+        }
+
+        const min = Math.min(...allValues);
+        const max = Math.max(...allValues);
+        const zeroY = height - ((0 - min) / (max - min || 1)) * height;
+        const line = (key, color) => {
+          const linePoints = points
+            .map((point, index) =>
+              point[key] === null || !Number.isFinite(point[key])
+                ? null
+                : svgPoint(index, points.length, point[key], min, max, width, height)
+            )
+            .filter(Boolean)
+            .join(" ");
+          return `<polyline points="${linePoints}" fill="none" stroke="${color}" stroke-width="3" />`;
+        };
+        const bars = points
+          .map((point, index) => {
+            if (point.macd_diff === null || !Number.isFinite(point.macd_diff)) return "";
+            const x = (index / Math.max(points.length - 1, 1)) * width;
+            const y = height - ((point.macd_diff - min) / (max - min || 1)) * height;
+            const barWidth = Math.max(width / points.length - 2, 2);
+            return `<rect x="${x.toFixed(1)}" y="${Math.min(y, zeroY).toFixed(1)}" width="${barWidth.toFixed(
+              1
+            )}" height="${Math.abs(zeroY - y).toFixed(1)}" fill="${point.macd_diff >= 0 ? "#14b8a6" : "#ef4444"}" opacity="0.55" />`;
+          })
+          .join("");
+
+        svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+        svg.innerHTML = `<line x1="0" x2="${width}" y1="${zeroY.toFixed(1)}" y2="${zeroY.toFixed(
+          1
+        )}" stroke="#94a3b8" stroke-dasharray="5 5" />${bars}${line("macd", "#2563eb")}${line("macd_signal", "#f59e0b")}`;
+      }
+
+      async function loadIndicatorPanels(symbol, timeframe) {
+        try {
+          const params = new URLSearchParams({ symbol, timeframe });
+          const response = await fetch(`/indicators?${params.toString()}`);
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+          const data = await response.json();
+          const points = data.points || [];
+          const latestRsi = [...points].reverse().find((point) => point.rsi_14 !== null && Number.isFinite(point.rsi_14));
+          const latestMacd = [...points]
+            .reverse()
+            .find((point) => point.macd !== null && Number.isFinite(point.macd) && point.macd_signal !== null && Number.isFinite(point.macd_signal));
+          rsiValue.textContent = latestRsi ? Number(latestRsi.rsi_14).toFixed(2) : "Waiting";
+          macdValue.textContent =
+            latestMacd
+              ? `${Number(latestMacd.macd).toFixed(2)} / ${Number(latestMacd.macd_signal).toFixed(2)}`
+              : "Waiting";
+          drawLineChart(
+            rsiChart,
+            points.map((point) => point.rsi_14),
+            {
+              min: 0,
+              max: 100,
+              color: "#2563eb",
+              guides: [
+                { value: 70, color: "#ef4444" },
+                { value: 50, color: "#94a3b8" },
+                { value: 30, color: "#14b8a6" },
+              ],
+            }
+          );
+          drawMacdChart(macdChart, points);
+        } catch (error) {
+          rsiValue.textContent = "Unavailable";
+          macdValue.textContent = "Unavailable";
+          rsiChart.innerHTML = '<text x="0" y="34" fill="#64748b" font-size="13">Indicator API unavailable</text>';
+          macdChart.innerHTML = '<text x="0" y="34" fill="#64748b" font-size="13">Indicator API unavailable</text>';
+        }
       }
 
       async function setChart(symbol, timeframe) {
@@ -983,7 +1151,7 @@
 
         try {
           await loadTradingViewScript();
-          const widget = new window.TradingView.widget({
+          new window.TradingView.widget({
             autosize: true,
             symbol: `BINANCE:${symbol}.P`,
             interval: tradingViewInterval(timeframe),
@@ -1007,12 +1175,14 @@
             },
             container_id: containerId,
           });
-          addTradingViewStudies(widget);
           chartFrame.querySelector(".chart-loading")?.remove();
         } catch (error) {
           chartFrame.innerHTML = '<div class="chart-loading">TradingView chart could not be loaded.</div>';
         }
 
+        if (currentIndicatorMode === "full") {
+          await loadIndicatorPanels(symbol, timeframe);
+        }
       }
 
       function chartButton(symbol, timeframe) {

@@ -119,6 +119,11 @@ async def status(_: None = ApiAuth) -> dict:
     return scanner.status()
 
 
+@app.get("/indicators")
+async def indicators(symbol: str, timeframe: str, _: None = ApiAuth) -> dict:
+    return scanner.indicator_series(symbol, timeframe)
+
+
 @app.post("/telegram/test")
 async def test_telegram(_: None = ApiAuth) -> dict[str, str]:
     if not alerter.enabled:
