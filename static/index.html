@@ -460,8 +460,12 @@
 
       .chart-frame {
         background: var(--surface-muted);
-        height: 560px;
+        height: 720px;
         width: 100%;
+      }
+
+      .chart-frame.ema-only {
+        height: 560px;
       }
 
       .chart-frame .tradingview-widget-container,
@@ -549,6 +553,10 @@
         }
 
         .chart-frame {
+          height: 560px;
+        }
+
+        .chart-frame.ema-only {
           height: 420px;
         }
       }
@@ -583,6 +591,8 @@
           <div class="chart-toolbar">
             <div class="chart-title" id="chartTitle">BTCUSDT 15m</div>
             <div class="chart-actions">
+              <button class="secondary" id="chartEmaMode" type="button">EMA</button>
+              <button class="secondary" id="chartFullMode" type="button">Full</button>
               <button class="secondary" id="chart15m" type="button">15m</button>
               <button class="secondary" id="chart30m" type="button">30m</button>
               <button class="secondary" id="chart1h" type="button">1h</button>
@@ -838,6 +848,8 @@
       const chartTitle = document.getElementById("chartTitle");
       const chartFrame = document.getElementById("chartFrame");
       const chartOpenLink = document.getElementById("chartOpenLink");
+      const chartEmaMode = document.getElementById("chartEmaMode");
+      const chartFullMode = document.getElementById("chartFullMode");
       const chart15m = document.getElementById("chart15m");
       const chart30m = document.getElementById("chart30m");
       const chart1h = document.getElementById("chart1h");
@@ -846,6 +858,7 @@
       let currentPairs = [];
       let currentChartSymbol = "BTCUSDT";
       let currentChartTimeframe = "15m";
+      let currentIndicatorMode = localStorage.getItem("cf-scanner-indicator-mode") || "full";
       let signalVisibleLimit = Number(signalLimitSelect.value);
       let tradingViewScriptPromise = null;
 
@@ -920,9 +933,32 @@
         return tradingViewScriptPromise;
       }
 
+      function chartStudies() {
+        const emaStudies = [
+          { id: "MAExp@tv-basicstudies", inputs: { length: 9 } },
+          { id: "MAExp@tv-basicstudies", inputs: { length: 21 } },
+          { id: "MAExp@tv-basicstudies", inputs: { length: 200 } },
+        ];
+        return currentIndicatorMode === "full" ? [...emaStudies, "RSI@tv-basicstudies", "MACD@tv-basicstudies"] : emaStudies;
+      }
+
+      function updateIndicatorModeButtons() {
+        chartEmaMode.classList.toggle("secondary", currentIndicatorMode !== "ema");
+        chartFullMode.classList.toggle("secondary", currentIndicatorMode !== "full");
+        chartFrame.classList.toggle("ema-only", currentIndicatorMode === "ema");
+      }
+
+      function setIndicatorMode(mode) {
+        currentIndicatorMode = mode;
+        localStorage.setItem("cf-scanner-indicator-mode", mode);
+        updateIndicatorModeButtons();
+        setChart(currentChartSymbol, currentChartTimeframe);
+      }
+
       async function setChart(symbol, timeframe) {
         currentChartSymbol = symbol;
         currentChartTimeframe = timeframe;
+        updateIndicatorModeButtons();
         chartTitle.textContent = `${symbol} ${timeframe}`;
         chartOpenLink.href = `https://www.tradingview.com/chart/?symbol=BINANCE:${symbol}.P`;
         const containerId = `tradingview_${Date.now()}`;
@@ -947,13 +983,7 @@
             hide_side_toolbar: false,
             allow_symbol_change: true,
             save_image: false,
-            studies: [
-              { id: "MAExp@tv-basicstudies", inputs: { length: 9 } },
-              { id: "MAExp@tv-basicstudies", inputs: { length: 21 } },
-              { id: "MAExp@tv-basicstudies", inputs: { length: 200 } },
-              "RSI@tv-basicstudies",
-              "MACD@tv-basicstudies",
-            ],
+            studies: chartStudies(),
             studies_overrides: {
               "moving average exponential.plot.color": "#2563eb",
               "moving average exponential.plot.linewidth": 2,
@@ -1256,6 +1286,8 @@
         setChart(currentChartSymbol, currentChartTimeframe);
       });
       testTelegramButton.addEventListener("click", testTelegram);
+      chartEmaMode.addEventListener("click", () => setIndicatorMode("ema"));
+      chartFullMode.addEventListener("click", () => setIndicatorMode("full"));
       chart15m.addEventListener("click", () => setChart(currentChartSymbol, "15m"));
       chart30m.addEventListener("click", () => setChart(currentChartSymbol, "30m"));
       chart1h.addEventListener("click", () => setChart(currentChartSymbol, "1h"));
