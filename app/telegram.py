@@ -18,9 +18,10 @@ class TelegramAlerter:
 
     async def send_signal(self, signal: Signal) -> bool:
         direction = "Bullish" if signal.signal_type == "LONG" else "Bearish"
+        marker = "\U0001F7E2" if signal.signal_type == "LONG" else "\U0001F534"
         volume_ratio = signal.indicators.get("volume_ratio", 0)
         text = (
-            f"{direction} {signal.signal_type} signal\n"
+            f"{marker} {direction} {signal.signal_type} signal\n"
             f"{signal.symbol} | {signal.timeframe}\n"
             f"Price: {signal.price:.4f}\n"
             f"RSI 14: {signal.rsi:.2f}\n"
