@@ -86,8 +86,19 @@ async def logout() -> RedirectResponse:
 
 
 @app.get("/health")
-async def health() -> dict[str, str]:
-    return {"status": "ok"}
+async def health() -> dict:
+    scanner_status = scanner.status()
+    healthy = scanner_status["running"] and scanner_status["market_data_status"] in {"OK", "Loading"}
+    return {
+        "status": "ok" if healthy else "warning",
+        "running": scanner_status["running"],
+        "market_data_status": scanner_status["market_data_status"],
+        "websocket_connected": scanner_status["websocket_connected"],
+        "loaded_pair_count": scanner_status["loaded_pair_count"],
+        "total_pair_count": scanner_status["total_pair_count"],
+        "stale_pair_count": scanner_status["stale_pair_count"],
+        "last_error": scanner_status["last_error"],
+    }
 
 
 @app.get("/signals", response_model=list[Signal])

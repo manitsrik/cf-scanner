@@ -15,8 +15,9 @@ This app does not place trades, does not use private Binance API keys, and does 
 - SQLite-backed latest signal storage
 - Telegram alert for each new signal
 - Simple HTML dashboard
-- Signal reason details and dashboard filters
+- Signal reason details, dashboard filters, time range filters, and load-more controls
 - Signal cooldown and near-setup monitoring
+- Runtime health metrics for market data freshness
 - Docker-ready deployment
 
 ## Signal Rules
@@ -91,7 +92,9 @@ http://localhost:8000
 - `GET /status`
 - `POST /telegram/test`
 
-`/status` shows scanner runtime state, websocket state, Telegram status, and latest closed candle time for every configured symbol/timeframe.
+`/status` shows scanner runtime state, websocket state, Telegram status, market-data freshness, stale pair counts, and latest closed candle time for every configured symbol/timeframe.
+
+`/health` stays public for uptime checks and returns a compact health summary with running state, market-data status, websocket state, loaded pair counts, stale pair counts, and the latest error.
 
 `/telegram/test` sends a test Telegram message when `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` are configured.
 

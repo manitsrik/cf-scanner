@@ -17,11 +17,15 @@ class TelegramAlerter:
         return bool(self.bot_token and self.chat_id)
 
     async def send_signal(self, signal: Signal) -> bool:
+        direction = "Bullish" if signal.signal_type == "LONG" else "Bearish"
+        volume_ratio = signal.indicators.get("volume_ratio", 0)
         text = (
-            f"{signal.signal_type} signal: {signal.symbol} {signal.timeframe}\n"
+            f"{direction} {signal.signal_type} signal\n"
+            f"{signal.symbol} | {signal.timeframe}\n"
             f"Price: {signal.price:.4f}\n"
             f"RSI 14: {signal.rsi:.2f}\n"
-            f"Volume: {signal.volume:.2f} > avg20 {signal.volume_average_20:.2f}\n"
+            f"Volume: {volume_ratio:.2f}x avg20\n\n"
+            "Checks:\n"
             + "\n".join(f"- {reason}" for reason in signal.reasons)
             + "\n"
             f"{signal.tradingview_url}"

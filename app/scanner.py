@@ -194,6 +194,11 @@ class FuturesScanner:
     def status(self) -> dict:
         pairs = []
         near_setups = []
+        now = datetime.now(timezone.utc)
+        total_pair_count = len(self._active_symbols) * len(self.settings.timeframes)
+        loaded_pair_count = 0
+        stale_pair_count = 0
+        latest_closed_candle_at = None
         for symbol in self._active_symbols:
             for timeframe in self.settings.timeframes:
                 candles = self._candles.get((symbol, timeframe))
@@ -205,7 +210,15 @@ class FuturesScanner:
                 if candles is not None and not candles.empty:
                     count = len(candles)
                     latest_row = candles.iloc[-1]
-                    latest = latest_row["close_time"].to_pydatetime().isoformat()
+                    latest_time = latest_row["close_time"].to_pydatetime()
+                    if latest_time.tzinfo is None:
+                        latest_time = latest_time.replace(tzinfo=timezone.utc)
+                    latest = latest_time.isoformat()
+                    loaded_pair_count += 1
+                    if latest_closed_candle_at is None or latest_time > latest_closed_candle_at:
+                        latest_closed_candle_at = latest_time
+                    if (now - latest_time).total_seconds() > self._stale_after_seconds(timeframe):
+                        stale_pair_count += 1
                     price = float(latest_row["close"])
                     indicators = self._indicator_snapshot(candles)
                     if indicators:
@@ -225,6 +238,15 @@ class FuturesScanner:
                     }
                 )
 
+        if self._last_error:
+            market_data_status = "Error"
+        elif loaded_pair_count == 0:
+            market_data_status = "Loading"
+        elif stale_pair_count > 0:
+            market_data_status = "Stale"
+        else:
+            market_data_status = "OK"
+
         return {
             "running": self._started_at is not None and not self._stop_event.is_set(),
             "websocket_connected": self._websocket_connected,
@@ -241,6 +263,11 @@ class FuturesScanner:
             "watchlist_updated_at": self._watchlist_updated_at.isoformat() if self._watchlist_updated_at else None,
             "last_error": self._last_error,
             "signal_cooldown_minutes": self.settings.signal_cooldown_minutes,
+            "market_data_status": market_data_status,
+            "total_pair_count": total_pair_count,
+            "loaded_pair_count": loaded_pair_count,
+            "stale_pair_count": stale_pair_count,
+            "latest_closed_candle_at": latest_closed_candle_at.isoformat() if latest_closed_candle_at else None,
             "near_setups": near_setups,
             "pairs": pairs,
         }
@@ -398,6 +425,14 @@ class FuturesScanner:
             "ema_gap_pct": ema_gap_pct,
             "tradingview_url": f"https://www.tradingview.com/chart/?symbol=BINANCE:{symbol}.P",
         }
+
+    @staticmethod
+    def _stale_after_seconds(timeframe: str) -> int:
+        if timeframe.endswith("m"):
+            return int(timeframe.removesuffix("m")) * 60 * 3
+        if timeframe.endswith("h"):
+            return int(timeframe.removesuffix("h")) * 60 * 60 * 3
+        return 60 * 60 * 3
 
     @staticmethod
     def _klines_to_dataframe(klines: list[list]) -> pd.DataFrame:

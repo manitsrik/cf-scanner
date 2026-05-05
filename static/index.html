@@ -236,6 +236,16 @@
         margin: -2px 0 10px;
       }
 
+      .table-footer {
+        display: flex;
+        justify-content: center;
+        padding: 12px;
+      }
+
+      .hidden {
+        display: none;
+      }
+
       .table-wrap {
         background: var(--surface);
         border: 1px solid var(--border);
@@ -540,6 +550,14 @@
           <span class="metric-label">Cooldown</span>
           <span class="metric-value" id="cooldownState">Loading</span>
         </div>
+        <div class="metric">
+          <span class="metric-label">Market Data</span>
+          <span class="metric-value" id="marketDataState">Loading</span>
+        </div>
+        <div class="metric">
+          <span class="metric-label">Latest Candle</span>
+          <span class="metric-value" id="latestCandleState">Waiting</span>
+        </div>
       </section>
 
       <section class="section">
@@ -602,6 +620,17 @@
             <option value="30m">30m</option>
             <option value="1h">1h</option>
           </select>
+          <select id="signalAgeFilter">
+            <option value="all">All dates</option>
+            <option value="today">Today</option>
+            <option value="24h">Last 24h</option>
+            <option value="7d">Last 7d</option>
+          </select>
+          <select id="signalLimitSelect">
+            <option value="10">Show 10</option>
+            <option value="20" selected>Show 20</option>
+            <option value="50">Show 50</option>
+          </select>
         </div>
         <div id="signalResultNote" class="result-note"></div>
         <div class="table-wrap">
@@ -624,6 +653,9 @@
               </tr>
             </tbody>
           </table>
+          <div class="table-footer">
+            <button class="secondary hidden" id="loadMoreSignalsButton" type="button">Load more</button>
+          </div>
         </div>
       </section>
 
@@ -674,6 +706,8 @@
       const lastRestRefreshEl = document.getElementById("lastRestRefresh");
       const lastErrorEl = document.getElementById("lastError");
       const cooldownStateEl = document.getElementById("cooldownState");
+      const marketDataStateEl = document.getElementById("marketDataState");
+      const latestCandleStateEl = document.getElementById("latestCandleState");
       const watchlistStateEl = document.getElementById("watchlistState");
       const watchlistUpdatedEl = document.getElementById("watchlistUpdated");
       const nearSetupsEl = document.getElementById("nearSetups");
@@ -684,7 +718,10 @@
       const signalSearch = document.getElementById("signalSearch");
       const signalTypeFilter = document.getElementById("signalTypeFilter");
       const signalTimeframeFilter = document.getElementById("signalTimeframeFilter");
+      const signalAgeFilter = document.getElementById("signalAgeFilter");
+      const signalLimitSelect = document.getElementById("signalLimitSelect");
       const signalResultNote = document.getElementById("signalResultNote");
+      const loadMoreSignalsButton = document.getElementById("loadMoreSignalsButton");
       const nearSearch = document.getElementById("nearSearch");
       const nearTypeFilter = document.getElementById("nearTypeFilter");
       const nearTimeframeFilter = document.getElementById("nearTimeframeFilter");
@@ -701,7 +738,7 @@
       let currentPairs = [];
       let currentChartSymbol = "BTCUSDT";
       let currentChartTimeframe = "15m";
-      const signalDisplayLimit = 20;
+      let signalVisibleLimit = Number(signalLimitSelect.value);
 
       function applyTheme(theme) {
         document.documentElement.dataset.theme = theme;
@@ -794,6 +831,22 @@
         return symbol.toLowerCase().includes(query.trim().toLowerCase());
       }
 
+      function matchesSignalAge(signal, ageFilter) {
+        if (ageFilter === "all") return true;
+        if (!signal.created_at) return false;
+
+        const createdAt = new Date(signal.created_at);
+        const now = new Date();
+        if (ageFilter === "24h") return now - createdAt <= 24 * 60 * 60 * 1000;
+        if (ageFilter === "7d") return now - createdAt <= 7 * 24 * 60 * 60 * 1000;
+        if (ageFilter === "today") return createdAt.toDateString() === now.toDateString();
+        return true;
+      }
+
+      function resetSignalVisibleLimit() {
+        signalVisibleLimit = Number(signalLimitSelect.value);
+      }
+
       function renderPairs() {
         const query = watchlistSearch.value;
         const timeframe = watchlistTimeframeFilter.value;
@@ -826,24 +879,29 @@
         const query = signalSearch.value;
         const signalType = signalTypeFilter.value;
         const timeframe = signalTimeframeFilter.value;
+        const ageFilter = signalAgeFilter.value;
         const signals = currentSignals.filter(
           (signal) =>
             matchesText(signal.symbol, query) &&
             (signalType === "all" || signal.signal_type === signalType) &&
-            (timeframe === "all" || signal.timeframe === timeframe)
+            (timeframe === "all" || signal.timeframe === timeframe) &&
+            matchesSignalAge(signal, ageFilter)
         );
 
         if (!signals.length) {
           signalResultNote.textContent = "";
+          loadMoreSignalsButton.classList.add("hidden");
           signalsEl.innerHTML = '<tr><td class="empty" colspan="8">No signals match your filters.</td></tr>';
           return;
         }
 
-        const visibleSignals = signals.slice(0, signalDisplayLimit);
+        const visibleCount = Math.min(signalVisibleLimit, signals.length);
+        const visibleSignals = signals.slice(0, visibleCount);
         signalResultNote.textContent =
-          signals.length > signalDisplayLimit
-            ? `Showing latest ${signalDisplayLimit} of ${signals.length} matching signals`
+          signals.length > visibleCount
+            ? `Showing latest ${visibleCount} of ${signals.length} matching signals`
             : `Showing ${signals.length} matching signal${signals.length === 1 ? "" : "s"}`;
+        loadMoreSignalsButton.classList.toggle("hidden", visibleCount >= signals.length);
 
         signalsEl.innerHTML = visibleSignals
           .map(
@@ -920,6 +978,12 @@
         lastRestRefreshEl.textContent = formatTime(status.last_rest_refresh_at);
         lastErrorEl.textContent = status.last_error || "None";
         cooldownStateEl.textContent = `${status.signal_cooldown_minutes || 0} min`;
+        marketDataStateEl.textContent = `${status.market_data_status || "Unknown"} - ${
+          status.loaded_pair_count || 0
+        }/${status.total_pair_count || 0}`;
+        latestCandleStateEl.textContent = status.latest_closed_candle_at
+          ? `${formatTime(status.latest_closed_candle_at)} (${status.stale_pair_count || 0} stale)`
+          : "Waiting";
         watchlistStateEl.textContent = `${status.auto_watchlist_enabled ? "Auto" : "Fixed"} - ${
           status.watchlist_size
         } symbols`;
@@ -944,6 +1008,7 @@
 
         if (!currentSignals.length) {
           signalResultNote.textContent = "";
+          loadMoreSignalsButton.classList.add("hidden");
           signalsEl.innerHTML = '<tr><td class="empty" colspan="8">Waiting for signals...</td></tr>';
           return;
         }
@@ -990,9 +1055,30 @@
       chart15m.addEventListener("click", () => setChart(currentChartSymbol, "15m"));
       chart30m.addEventListener("click", () => setChart(currentChartSymbol, "30m"));
       chart1h.addEventListener("click", () => setChart(currentChartSymbol, "1h"));
-      signalSearch.addEventListener("input", renderSignals);
-      signalTypeFilter.addEventListener("change", renderSignals);
-      signalTimeframeFilter.addEventListener("change", renderSignals);
+      signalSearch.addEventListener("input", () => {
+        resetSignalVisibleLimit();
+        renderSignals();
+      });
+      signalTypeFilter.addEventListener("change", () => {
+        resetSignalVisibleLimit();
+        renderSignals();
+      });
+      signalTimeframeFilter.addEventListener("change", () => {
+        resetSignalVisibleLimit();
+        renderSignals();
+      });
+      signalAgeFilter.addEventListener("change", () => {
+        resetSignalVisibleLimit();
+        renderSignals();
+      });
+      signalLimitSelect.addEventListener("change", () => {
+        resetSignalVisibleLimit();
+        renderSignals();
+      });
+      loadMoreSignalsButton.addEventListener("click", () => {
+        signalVisibleLimit += Number(signalLimitSelect.value);
+        renderSignals();
+      });
       nearSearch.addEventListener("input", renderNearSetups);
       nearTypeFilter.addEventListener("change", renderNearSetups);
       nearTimeframeFilter.addEventListener("change", renderNearSetups);
