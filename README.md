@@ -64,6 +64,8 @@ SIGNAL_LIMIT=100
 AUTO_WATCHLIST_ENABLED=true
 AUTO_WATCHLIST_SIZE=20
 WATCHLIST_REFRESH_SECONDS=900
+REST_REFRESH_SECONDS=900
+REST_CONCURRENCY=3
 SIGNAL_COOLDOWN_MINUTES=120
 NEAR_CROSS_THRESHOLD_PCT=0.15
 NEAR_VOLUME_RATIO_MIN=0.8
@@ -116,6 +118,8 @@ By default the scanner builds an automatic watchlist from Binance USDT perpetual
 
 Set `AUTO_WATCHLIST_ENABLED=false` to scan only the fixed fallback list in `app/config.py`.
 
+`REST_REFRESH_SECONDS` controls how often the app reloads closed candles from Binance REST. The websocket handles live closed-candle updates between refreshes, so the default is intentionally conservative for hosted environments with shared outbound IPs. `REST_CONCURRENCY` limits simultaneous Binance REST requests.
+
 ## Docker
 
 Build and run:
@@ -154,6 +158,8 @@ Do not commit `.env`. Use `.env.example` as the template.
 - `AUTO_WATCHLIST_ENABLED`
 - `AUTO_WATCHLIST_SIZE`
 - `WATCHLIST_REFRESH_SECONDS`
+- `REST_REFRESH_SECONDS`
+- `REST_CONCURRENCY`
 - `SIGNAL_COOLDOWN_MINUTES`
 - `NEAR_CROSS_THRESHOLD_PCT`
 - `NEAR_VOLUME_RATIO_MIN`

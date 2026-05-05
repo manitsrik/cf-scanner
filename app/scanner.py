@@ -16,6 +16,28 @@ from app.telegram import TelegramAlerter
 logger = logging.getLogger(__name__)
 
 
+class MarketDataError(Exception):
+    def __init__(self, symbol: str, timeframe: str, status_code: int, reason: str) -> None:
+        self.symbol = symbol
+        self.timeframe = timeframe
+        self.status_code = status_code
+        self.reason = reason
+        super().__init__(f"{symbol} {timeframe}: HTTP {status_code} {reason}")
+
+    def dashboard_message(self) -> str:
+        if self.status_code == 418:
+            return (
+                f"Binance REST blocked this server IP with HTTP 418 while loading {self.symbol} {self.timeframe}. "
+                "Reduce REST refreshes or move to a fresh/persistent outbound IP."
+            )
+        if self.status_code == 429:
+            return (
+                f"Binance REST rate limit hit with HTTP 429 while loading {self.symbol} {self.timeframe}. "
+                "Scanner will retry on the next REST refresh."
+            )
+        return f"Binance REST HTTP {self.status_code} while loading {self.symbol} {self.timeframe}."
+
+
 class FuturesScanner:
     def __init__(self, settings: Settings, store: SignalStore, alerter: TelegramAlerter) -> None:
         self.settings = settings
@@ -44,20 +66,31 @@ class FuturesScanner:
         while not self._stop_event.is_set():
             await self._refresh_watchlist()
             await self._load_initial_candles()
-            await asyncio.sleep(60)
+            await asyncio.sleep(self.settings.rest_refresh_seconds)
 
     async def _load_initial_candles(self) -> None:
+        semaphore = asyncio.Semaphore(self.settings.rest_concurrency)
+
+        async def fetch_with_limit(symbol: str, timeframe: str) -> tuple[str, str, pd.DataFrame]:
+            async with semaphore:
+                return await self._fetch_klines(client, symbol, timeframe)
+
         async with httpx.AsyncClient(base_url=self.settings.binance_rest_url, timeout=15) as client:
             tasks = [
-                self._fetch_klines(client, symbol, timeframe)
+                fetch_with_limit(symbol, timeframe)
                 for symbol in self._active_symbols
                 for timeframe in self.settings.timeframes
             ]
             results = await asyncio.gather(*tasks, return_exceptions=True)
 
+        had_error = False
         for result in results:
             if isinstance(result, Exception):
-                self._last_error = f"Initial candle load failed: {result}"
+                had_error = True
+                if isinstance(result, MarketDataError):
+                    self._last_error = result.dashboard_message()
+                else:
+                    self._last_error = f"Initial candle load failed: {result}"
                 logger.error("Initial candle load failed: %s", result)
                 continue
             symbol, timeframe, candles = result
@@ -66,6 +99,8 @@ class FuturesScanner:
             if signal and self.store.add_if_new(signal, self.settings.signal_cooldown_minutes):
                 logger.info("New %s signal for %s %s from REST refresh.", signal.signal_type, symbol, timeframe)
                 await self.alerter.send_signal(signal)
+        if not had_error:
+            self._last_error = None
         self._initial_load_completed_at = datetime.now(timezone.utc)
         self._last_rest_refresh_at = self._initial_load_completed_at
 
@@ -123,7 +158,10 @@ class FuturesScanner:
             "/fapi/v1/klines",
             params={"symbol": symbol, "interval": timeframe, "limit": self.settings.kline_limit},
         )
-        response.raise_for_status()
+        try:
+            response.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            raise MarketDataError(symbol, timeframe, exc.response.status_code, exc.response.reason_phrase) from exc
         return symbol, timeframe, self._klines_to_dataframe(response.json())
 
     async def _run_websocket_loop(self) -> None:

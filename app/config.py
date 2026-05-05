@@ -14,6 +14,8 @@ class Settings(BaseSettings):
     auto_watchlist_enabled: bool = True
     auto_watchlist_size: int = 20
     watchlist_refresh_seconds: int = 900
+    rest_refresh_seconds: int = 900
+    rest_concurrency: int = 3
     kline_limit: int = 250
     binance_rest_url: str = "https://fapi.binance.com"
     binance_ws_url: str = "wss://fstream.binance.com/stream"
