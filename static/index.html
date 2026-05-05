@@ -464,11 +464,26 @@
         width: 100%;
       }
 
+      .chart-frame .tradingview-widget-container,
+      .chart-frame .tradingview-widget-container__widget {
+        height: 100%;
+        width: 100%;
+      }
+
       .chart-frame iframe {
         border: 0;
         display: block;
         height: 100%;
         width: 100%;
+      }
+
+      .chart-loading {
+        align-items: center;
+        color: var(--muted);
+        display: flex;
+        font-size: 14px;
+        height: 100%;
+        justify-content: center;
       }
 
       .link-button {
@@ -832,6 +847,7 @@
       let currentChartSymbol = "BTCUSDT";
       let currentChartTimeframe = "15m";
       let signalVisibleLimit = Number(signalLimitSelect.value);
+      let tradingViewScriptPromise = null;
 
       function applyTheme(theme) {
         document.documentElement.dataset.theme = theme;
@@ -889,30 +905,55 @@
         return timeframe.replace("m", "");
       }
 
-      function chartUrl(symbol, timeframe) {
-        const params = new URLSearchParams({
-          symbol: `BINANCE:${symbol}.P`,
-          interval: tradingViewInterval(timeframe),
-          theme: document.documentElement.dataset.theme === "dark" ? "dark" : "light",
-          style: "1",
-          timezone: "Etc/UTC",
-          hide_side_toolbar: "0",
-          allow_symbol_change: "1",
-          save_image: "0",
+      function loadTradingViewScript() {
+        if (window.TradingView && window.TradingView.widget) return Promise.resolve();
+        if (tradingViewScriptPromise) return tradingViewScriptPromise;
+
+        tradingViewScriptPromise = new Promise((resolve, reject) => {
+          const script = document.createElement("script");
+          script.src = "https://s3.tradingview.com/tv.js";
+          script.async = true;
+          script.onload = resolve;
+          script.onerror = reject;
+          document.head.appendChild(script);
         });
-        ["STD;EMA", "STD;RSI", "STD;MACD"].forEach((study) => params.append("studies", study));
-        return `https://s.tradingview.com/widgetembed/?${params.toString()}`;
+        return tradingViewScriptPromise;
       }
 
-      function setChart(symbol, timeframe) {
+      async function setChart(symbol, timeframe) {
         currentChartSymbol = symbol;
         currentChartTimeframe = timeframe;
         chartTitle.textContent = `${symbol} ${timeframe}`;
         chartOpenLink.href = `https://www.tradingview.com/chart/?symbol=BINANCE:${symbol}.P`;
-        chartFrame.innerHTML = `<iframe title="${escapeHtml(symbol)} ${escapeHtml(timeframe)} chart" src="${chartUrl(
-          symbol,
-          timeframe
-        )}" allowtransparency="true" scrolling="no" allowfullscreen></iframe>`;
+        const containerId = `tradingview_${Date.now()}`;
+        chartFrame.innerHTML = `
+          <div class="tradingview-widget-container">
+            <div id="${containerId}" class="tradingview-widget-container__widget"></div>
+            <div class="chart-loading">Loading TradingView chart...</div>
+          </div>
+        `;
+
+        try {
+          await loadTradingViewScript();
+          new window.TradingView.widget({
+            autosize: true,
+            symbol: `BINANCE:${symbol}.P`,
+            interval: tradingViewInterval(timeframe),
+            timezone: "Etc/UTC",
+            theme: document.documentElement.dataset.theme === "dark" ? "dark" : "light",
+            style: "1",
+            locale: "en",
+            enable_publishing: false,
+            hide_side_toolbar: false,
+            allow_symbol_change: true,
+            save_image: false,
+            studies: ["STD;EMA", "STD;RSI", "STD;MACD"],
+            container_id: containerId,
+          });
+          chartFrame.querySelector(".chart-loading")?.remove();
+        } catch (error) {
+          chartFrame.innerHTML = '<div class="chart-loading">TradingView chart could not be loaded.</div>';
+        }
       }
 
       function chartButton(symbol, timeframe) {
