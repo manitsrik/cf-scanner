@@ -153,40 +153,50 @@
 
       .summary {
         display: grid;
-        gap: 12px;
-        grid-template-columns: repeat(5, minmax(0, 1fr));
-        margin-bottom: 20px;
+        gap: 8px;
+        grid-template-columns: repeat(6, minmax(0, 1fr));
+        margin-bottom: 16px;
       }
 
       .metric {
+        align-content: center;
         background: var(--surface);
         border: 1px solid var(--border);
-        border-radius: 8px;
-        min-height: 88px;
-        padding: 15px;
+        border-radius: 7px;
+        display: grid;
+        gap: 5px;
+        min-height: 62px;
+        padding: 10px 12px;
+      }
+
+      .metric.compact {
+        min-height: 56px;
+      }
+
+      .metric.wide {
+        grid-column: span 2;
       }
 
       .metric-label {
         color: var(--muted);
         display: block;
-        font-size: 11px;
+        font-size: 10px;
         font-weight: 800;
-        letter-spacing: 0.04em;
-        margin-bottom: 9px;
+        letter-spacing: 0.05em;
         text-transform: uppercase;
       }
 
       .metric-value {
         color: var(--text);
         display: block;
-        font-size: 15px;
+        font-size: 14px;
         font-weight: 800;
-        line-height: 1.35;
+        line-height: 1.25;
         overflow-wrap: anywhere;
       }
 
       .section {
-        margin-bottom: 20px;
+        margin-bottom: 16px;
       }
 
       .section-head {
@@ -429,7 +439,11 @@
         }
 
         .summary {
-          grid-template-columns: repeat(2, minmax(0, 1fr));
+          grid-template-columns: repeat(3, minmax(0, 1fr));
+        }
+
+        .metric.wide {
+          grid-column: span 3;
         }
       }
 
@@ -449,7 +463,11 @@
         }
 
         .summary {
-          grid-template-columns: 1fr;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        .metric.wide {
+          grid-column: span 2;
         }
 
         .section-head {
@@ -510,43 +528,27 @@
       </section>
 
       <section class="summary" aria-label="Scanner status">
-        <div class="metric">
+        <div class="metric compact">
           <span class="metric-label">Scanner</span>
           <span class="metric-value" id="scannerState">Loading</span>
         </div>
-        <div class="metric">
+        <div class="metric compact">
           <span class="metric-label">Websocket</span>
           <span class="metric-value" id="websocketState">Loading</span>
         </div>
-        <div class="metric">
+        <div class="metric compact">
           <span class="metric-label">Telegram</span>
           <span class="metric-value" id="telegramState">Loading</span>
         </div>
-        <div class="metric">
+        <div class="metric compact">
           <span class="metric-label">Watchlist</span>
           <span class="metric-value" id="watchlistState">Loading</span>
         </div>
-        <div class="metric">
+        <div class="metric compact">
           <span class="metric-label">Near Setups</span>
           <span class="metric-value" id="nearSetupState">Loading</span>
         </div>
-        <div class="metric">
-          <span class="metric-label">Last Message</span>
-          <span class="metric-value" id="lastMessage">Waiting</span>
-        </div>
-        <div class="metric">
-          <span class="metric-label">REST Refresh</span>
-          <span class="metric-value" id="lastRestRefresh">Waiting</span>
-        </div>
-        <div class="metric">
-          <span class="metric-label">Watchlist Updated</span>
-          <span class="metric-value" id="watchlistUpdated">Waiting</span>
-        </div>
-        <div class="metric">
-          <span class="metric-label">Last Error</span>
-          <span class="metric-value" id="lastError">None</span>
-        </div>
-        <div class="metric">
+        <div class="metric compact">
           <span class="metric-label">Cooldown</span>
           <span class="metric-value" id="cooldownState">Loading</span>
         </div>
@@ -557,6 +559,22 @@
         <div class="metric">
           <span class="metric-label">Latest Candle</span>
           <span class="metric-value" id="latestCandleState">Waiting</span>
+        </div>
+        <div class="metric">
+          <span class="metric-label">REST Refresh</span>
+          <span class="metric-value" id="lastRestRefresh">Waiting</span>
+        </div>
+        <div class="metric">
+          <span class="metric-label">Watchlist Updated</span>
+          <span class="metric-value" id="watchlistUpdated">Waiting</span>
+        </div>
+        <div class="metric">
+          <span class="metric-label">Last Message</span>
+          <span class="metric-value" id="lastMessage">Waiting</span>
+        </div>
+        <div class="metric wide">
+          <span class="metric-label">Last Error</span>
+          <span class="metric-value" id="lastError">None</span>
         </div>
       </section>
 
