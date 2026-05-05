@@ -460,12 +460,12 @@
 
       .chart-frame {
         background: var(--surface-muted);
-        height: 430px;
+        height: 390px;
         width: 100%;
       }
 
       .chart-frame.ema-only {
-        height: 500px;
+        height: 460px;
       }
 
       .chart-frame .tradingview-widget-container,
@@ -504,8 +504,8 @@
 
       .indicator-panel {
         border-top: 1px solid var(--border-soft);
-        min-height: 86px;
-        padding: 8px 12px;
+        min-height: 66px;
+        padding: 6px 12px;
       }
 
       .indicator-panel:first-child {
@@ -515,15 +515,15 @@
       .indicator-panel-head {
         color: var(--muted);
         display: flex;
-        font-size: 12px;
+        font-size: 11px;
         font-weight: 800;
         justify-content: space-between;
-        margin-bottom: 4px;
+        margin-bottom: 2px;
       }
 
       .indicator-svg {
         display: block;
-        height: 58px;
+        height: 44px;
         width: 100%;
       }
 
@@ -590,15 +590,15 @@
         }
 
         .chart-frame {
-          height: 360px;
+          height: 320px;
         }
 
         .chart-frame.ema-only {
-          height: 420px;
+          height: 390px;
         }
 
         .indicator-panel {
-          min-height: 78px;
+          min-height: 60px;
         }
       }
     </style>
@@ -1026,10 +1026,10 @@
 
       function drawLineChart(svg, values, options = {}) {
         const width = 1000;
-        const height = 58;
+        const height = 44;
         const cleanValues = values.filter((value) => value !== null && Number.isFinite(value));
         if (cleanValues.length < 2) {
-          svg.innerHTML = '<text x="0" y="34" fill="#64748b" font-size="13">Waiting for data</text>';
+          svg.innerHTML = '<text x="0" y="28" fill="#64748b" font-size="12">Waiting for data</text>';
           return;
         }
 
@@ -1049,18 +1049,18 @@
           .join("");
 
         svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
-        svg.innerHTML = `${guides}<polyline points="${points}" fill="none" stroke="${options.color || "#2563eb"}" stroke-width="3" />`;
+        svg.innerHTML = `${guides}<polyline points="${points}" fill="none" stroke="${options.color || "#2563eb"}" stroke-width="2.6" />`;
       }
 
       function drawMacdChart(svg, points) {
         const width = 1000;
-        const height = 58;
+        const height = 44;
         const macd = points.map((point) => point.macd).filter((value) => value !== null && Number.isFinite(value));
         const signal = points.map((point) => point.macd_signal).filter((value) => value !== null && Number.isFinite(value));
         const diff = points.map((point) => point.macd_diff).filter((value) => value !== null && Number.isFinite(value));
         const allValues = [...macd, ...signal, ...diff];
         if (allValues.length < 2) {
-          svg.innerHTML = '<text x="0" y="34" fill="#64748b" font-size="13">Waiting for data</text>';
+          svg.innerHTML = '<text x="0" y="28" fill="#64748b" font-size="12">Waiting for data</text>';
           return;
         }
 
@@ -1076,14 +1076,14 @@
             )
             .filter(Boolean)
             .join(" ");
-          return `<polyline points="${linePoints}" fill="none" stroke="${color}" stroke-width="3" />`;
+          return `<polyline points="${linePoints}" fill="none" stroke="${color}" stroke-width="2.6" />`;
         };
         const bars = points
           .map((point, index) => {
             if (point.macd_diff === null || !Number.isFinite(point.macd_diff)) return "";
             const x = (index / Math.max(points.length - 1, 1)) * width;
             const y = height - ((point.macd_diff - min) / (max - min || 1)) * height;
-            const barWidth = Math.max(width / points.length - 2, 2);
+            const barWidth = Math.max(width / points.length - 2.5, 1.6);
             return `<rect x="${x.toFixed(1)}" y="${Math.min(y, zeroY).toFixed(1)}" width="${barWidth.toFixed(
               1
             )}" height="${Math.abs(zeroY - y).toFixed(1)}" fill="${point.macd_diff >= 0 ? "#14b8a6" : "#ef4444"}" opacity="0.55" />`;
