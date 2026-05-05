@@ -18,7 +18,7 @@ from app.telegram import TelegramAlerter
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s - %(message)s")
 
 settings = get_settings()
-store = SignalStore(limit=settings.signal_limit)
+store = SignalStore(limit=settings.signal_limit, db_path=settings.signal_db_path)
 alerter = TelegramAlerter(settings.telegram_bot_token, settings.telegram_chat_id)
 scanner = FuturesScanner(settings=settings, store=store, alerter=alerter)
 scanner_task: asyncio.Task | None = None

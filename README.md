@@ -1,6 +1,6 @@
 # CF Scanner
 
-Personal crypto USDT futures pattern scanner built with FastAPI. It uses Binance Futures public market data only, stores signals in memory, and can send Telegram alerts.
+Personal crypto USDT futures pattern scanner built with FastAPI. It uses Binance Futures public market data only, stores signals in SQLite, and can send Telegram alerts.
 
 This app does not place trades, does not use private Binance API keys, and does not implement auto trading.
 
@@ -12,7 +12,7 @@ This app does not place trades, does not use private Binance API keys, and does 
 - Timeframes: `15m`, `30m`, `1h`
 - Indicators: EMA 9, EMA 21, EMA 200, RSI 14, volume average 20
 - LONG and SHORT signal detection
-- In-memory latest signal storage
+- SQLite-backed latest signal storage
 - Telegram alert for each new signal
 - Simple HTML dashboard
 - Signal reason details and dashboard filters
@@ -58,6 +58,8 @@ Create a `.env` file if you want Telegram alerts:
 ```env
 TELEGRAM_BOT_TOKEN=your_bot_token
 TELEGRAM_CHAT_ID=your_chat_id
+SIGNAL_DB_PATH=data/signals.db
+SIGNAL_LIMIT=100
 AUTO_WATCHLIST_ENABLED=true
 AUTO_WATCHLIST_SIZE=20
 WATCHLIST_REFRESH_SECONDS=900
@@ -99,6 +101,12 @@ Set `DASHBOARD_PASSWORD` to require login for the dashboard and scanner APIs. Se
 
 `GET /health` remains public for uptime checks.
 
+## Signal History
+
+Signals are saved to SQLite at `SIGNAL_DB_PATH`, which defaults to `data/signals.db`. The dashboard and `/signals` API load the latest `SIGNAL_LIMIT` rows after restart, so recent signal history stays available when the app restarts.
+
+Keep `data/` out of git because it contains runtime state. On hosted platforms with ephemeral disks, configure a persistent volume if you need signal history to survive redeploys.
+
 ## Watchlist
 
 By default the scanner builds an automatic watchlist from Binance USDT perpetual futures. It ranks markets by 24h `quoteVolume` and scans the top `AUTO_WATCHLIST_SIZE` symbols.
@@ -138,6 +146,8 @@ Do not commit `.env`. Use `.env.example` as the template.
 
 - `TELEGRAM_BOT_TOKEN`
 - `TELEGRAM_CHAT_ID`
+- `SIGNAL_DB_PATH`
+- `SIGNAL_LIMIT`
 - `AUTO_WATCHLIST_ENABLED`
 - `AUTO_WATCHLIST_SIZE`
 - `WATCHLIST_REFRESH_SECONDS`

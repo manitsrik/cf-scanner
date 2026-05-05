@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     binance_ws_url: str = "wss://fstream.binance.com/stream"
     telegram_bot_token: str | None = None
     telegram_chat_id: str | None = None
+    signal_db_path: str = "data/signals.db"
     signal_limit: int = 100
     signal_cooldown_minutes: int = 120
     near_cross_threshold_pct: float = 0.15

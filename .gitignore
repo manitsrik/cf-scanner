@@ -19,6 +19,12 @@ env/
 .env.*
 !.env.example
 
+# Local app data
+data/
+*.db
+*.sqlite
+*.sqlite3
+
 # Local editor and OS files
 .idea/
 .vscode/
@@ -30,4 +36,3 @@ Thumbs.db
 build/
 dist/
 *.egg-info/
-
