@@ -332,6 +332,27 @@ class FuturesScanner:
     def symbols(self) -> list[str]:
         return list(self._active_symbols)
 
+    def indicator_series(self, symbol: str, timeframe: str, limit: int = 120) -> dict:
+        candles = self._candles.get((symbol, timeframe))
+        if candles is None or candles.empty:
+            return {"symbol": symbol, "timeframe": timeframe, "points": []}
+
+        df = add_indicators(candles).tail(limit)
+        points = []
+        for _, row in df.iterrows():
+            points.append(
+                {
+                    "time": row["close_time"].to_pydatetime().isoformat(),
+                    "close": self._clean_number(row["close"]),
+                    "rsi_14": self._clean_number(row["rsi_14"]),
+                    "macd": self._clean_number(row["macd"]),
+                    "macd_signal": self._clean_number(row["macd_signal"]),
+                    "macd_diff": self._clean_number(row["macd_diff"]),
+                }
+            )
+
+        return {"symbol": symbol, "timeframe": timeframe, "points": points}
+
     def _upsert_candle(self, symbol: str, timeframe: str, row: dict) -> None:
         key = (symbol, timeframe)
         current = self._candles.get(key, pd.DataFrame())
@@ -512,6 +533,12 @@ class FuturesScanner:
 
         self._last_alert_at[key] = now
         await self.alerter.send_text(f"CF Scanner system alert\n{message}")
+
+    @staticmethod
+    def _clean_number(value) -> float | None:
+        if pd.isna(value):
+            return None
+        return float(value)
 
     @staticmethod
     def _klines_to_dataframe(klines: list[list]) -> pd.DataFrame:
