@@ -441,9 +441,9 @@
         border-bottom: 1px solid var(--border-soft);
         display: flex;
         flex-wrap: wrap;
-        gap: 10px;
+        gap: 8px;
         justify-content: space-between;
-        padding: 12px 14px;
+        padding: 8px 12px;
       }
 
       .chart-title {
@@ -460,12 +460,12 @@
 
       .chart-frame {
         background: var(--surface-muted);
-        height: 720px;
+        height: 620px;
         width: 100%;
       }
 
       .chart-frame.ema-only {
-        height: 560px;
+        height: 500px;
       }
 
       .chart-frame .tradingview-widget-container,
@@ -553,7 +553,7 @@
         }
 
         .chart-frame {
-          height: 560px;
+          height: 520px;
         }
 
         .chart-frame.ema-only {
@@ -981,6 +981,7 @@
             locale: "en",
             enable_publishing: false,
             hide_side_toolbar: false,
+            hide_top_toolbar: true,
             allow_symbol_change: true,
             save_image: false,
             studies: chartStudies(),
