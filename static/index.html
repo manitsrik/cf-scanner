@@ -230,6 +230,12 @@
         font-size: 13px;
       }
 
+      .result-note {
+        color: var(--muted);
+        font-size: 13px;
+        margin: -2px 0 10px;
+      }
+
       .table-wrap {
         background: var(--surface);
         border: 1px solid var(--border);
@@ -597,6 +603,7 @@
             <option value="1h">1h</option>
           </select>
         </div>
+        <div id="signalResultNote" class="result-note"></div>
         <div class="table-wrap">
           <table>
             <thead>
@@ -677,6 +684,7 @@
       const signalSearch = document.getElementById("signalSearch");
       const signalTypeFilter = document.getElementById("signalTypeFilter");
       const signalTimeframeFilter = document.getElementById("signalTimeframeFilter");
+      const signalResultNote = document.getElementById("signalResultNote");
       const nearSearch = document.getElementById("nearSearch");
       const nearTypeFilter = document.getElementById("nearTypeFilter");
       const nearTimeframeFilter = document.getElementById("nearTimeframeFilter");
@@ -693,6 +701,7 @@
       let currentPairs = [];
       let currentChartSymbol = "BTCUSDT";
       let currentChartTimeframe = "15m";
+      const signalDisplayLimit = 20;
 
       function applyTheme(theme) {
         document.documentElement.dataset.theme = theme;
@@ -825,11 +834,18 @@
         );
 
         if (!signals.length) {
+          signalResultNote.textContent = "";
           signalsEl.innerHTML = '<tr><td class="empty" colspan="8">No signals match your filters.</td></tr>';
           return;
         }
 
-        signalsEl.innerHTML = signals
+        const visibleSignals = signals.slice(0, signalDisplayLimit);
+        signalResultNote.textContent =
+          signals.length > signalDisplayLimit
+            ? `Showing latest ${signalDisplayLimit} of ${signals.length} matching signals`
+            : `Showing ${signals.length} matching signal${signals.length === 1 ? "" : "s"}`;
+
+        signalsEl.innerHTML = visibleSignals
           .map(
             (signal) => `
               <tr>
@@ -927,6 +943,7 @@
         statusEl.textContent = `Live - ${currentSignals.length} signal${currentSignals.length === 1 ? "" : "s"}`;
 
         if (!currentSignals.length) {
+          signalResultNote.textContent = "";
           signalsEl.innerHTML = '<tr><td class="empty" colspan="8">Waiting for signals...</td></tr>';
           return;
         }
