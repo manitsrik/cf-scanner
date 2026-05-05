@@ -631,29 +631,6 @@
 
       <section class="section">
         <div class="section-head">
-          <h2>System Log</h2>
-          <div class="section-note">Latest scanner events, reconnects, and market-data issues</div>
-        </div>
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Time</th>
-                <th>Level</th>
-                <th>Message</th>
-              </tr>
-            </thead>
-            <tbody id="systemLog">
-              <tr>
-                <td class="empty" colspan="3">Waiting for system events...</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </section>
-
-      <section class="section">
-        <div class="section-head">
           <h2>Near Setups</h2>
           <div class="section-note">Markets close to a valid signal but not crossed yet</div>
         </div>
@@ -780,6 +757,29 @@
             <tbody id="scannerPairs">
               <tr>
                 <td class="empty" colspan="5">Loading scanner status...</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="section-head">
+          <h2>System Log</h2>
+          <div class="section-note">Debug-only events, reconnects, and market-data issues</div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Time</th>
+                <th>Level</th>
+                <th>Message</th>
+              </tr>
+            </thead>
+            <tbody id="systemLog">
+              <tr>
+                <td class="empty" colspan="3">Waiting for system events...</td>
               </tr>
             </tbody>
           </table>
@@ -1076,7 +1076,7 @@
         }
 
         systemLogEl.innerHTML = events
-          .slice(0, 8)
+          .slice(0, 5)
           .map(
             (event) => `
               <tr>
