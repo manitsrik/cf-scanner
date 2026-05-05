@@ -1145,7 +1145,12 @@
 
       async function loadSignals() {
         const response = await fetch("/signals");
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        if (!response.ok) {
+          signalResultNote.textContent = "";
+          loadMoreSignalsButton.classList.add("hidden");
+          signalsEl.innerHTML = `<tr><td class="empty" colspan="8">Signal API unavailable: HTTP ${response.status}</td></tr>`;
+          throw new Error(`HTTP ${response.status}`);
+        }
         currentSignals = await response.json();
         statusEl.textContent = `Live - ${currentSignals.length} signal${currentSignals.length === 1 ? "" : "s"}`;
 

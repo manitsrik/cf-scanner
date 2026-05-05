@@ -88,6 +88,7 @@ async def logout() -> RedirectResponse:
 @app.get("/health")
 async def health() -> dict:
     scanner_status = scanner.status()
+    latest_signal_at = store.latest_created_at()
     healthy = scanner_status["running"] and scanner_status["market_data_status"] in {"OK", "Loading"}
     return {
         "status": "ok" if healthy else "warning",
@@ -97,6 +98,8 @@ async def health() -> dict:
         "loaded_pair_count": scanner_status["loaded_pair_count"],
         "total_pair_count": scanner_status["total_pair_count"],
         "stale_pair_count": scanner_status["stale_pair_count"],
+        "signal_count": store.count(),
+        "latest_signal_at": latest_signal_at.isoformat() if latest_signal_at else None,
         "last_error": scanner_status["last_error"],
     }
 

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from collections import deque
 from contextlib import closing
 from datetime import datetime, timedelta, timezone
@@ -35,11 +37,28 @@ class SignalStore:
             self._last_signal_at[key] = now
             self._signals.appendleft(signal)
             self._save_signal(signal)
+            self._trim_saved_signals()
             return True
 
     def list(self) -> list[Signal]:
+        if self.db_path:
+            return self._list_saved_signals()
+
         with self._lock:
             return list(self._signals)
+
+    def count(self) -> int:
+        if not self.db_path or not self.db_path.exists():
+            with self._lock:
+                return len(self._signals)
+
+        with closing(sqlite3.connect(self.db_path)) as connection:
+            row = connection.execute("SELECT COUNT(*) FROM signals").fetchone()
+        return int(row[0] if row else 0)
+
+    def latest_created_at(self) -> datetime | None:
+        latest = self.list()[:1]
+        return latest[0].created_at if latest else None
 
     def _initialize_db(self) -> None:
         if not self.db_path:
@@ -71,6 +90,15 @@ class SignalStore:
         if not self.db_path or not self.db_path.exists():
             return
 
+        for signal in self._list_saved_signals():
+            self._signals.append(signal)
+            self._seen.add(signal.id)
+            self._remember_last_signal(signal)
+
+    def _list_saved_signals(self) -> list[Signal]:
+        if not self.db_path or not self.db_path.exists():
+            return []
+
         with closing(sqlite3.connect(self.db_path)) as connection:
             rows = connection.execute(
                 """
@@ -82,18 +110,16 @@ class SignalStore:
                 (self.limit,),
             ).fetchall()
 
-        for (payload,) in rows:
-            signal = Signal.model_validate_json(payload)
-            self._signals.append(signal)
-            self._seen.add(signal.id)
+        return [Signal.model_validate_json(payload) for (payload,) in rows]
 
-            key = (signal.symbol, signal.timeframe, signal.signal_type)
-            previous = self._last_signal_at.get(key)
-            signal_time = signal.created_at
-            if signal_time.tzinfo is None:
-                signal_time = signal_time.replace(tzinfo=timezone.utc)
-            if previous is None or signal_time > previous:
-                self._last_signal_at[key] = signal_time
+    def _remember_last_signal(self, signal: Signal) -> None:
+        key = (signal.symbol, signal.timeframe, signal.signal_type)
+        previous = self._last_signal_at.get(key)
+        signal_time = signal.created_at
+        if signal_time.tzinfo is None:
+            signal_time = signal_time.replace(tzinfo=timezone.utc)
+        if previous is None or signal_time > previous:
+            self._last_signal_at[key] = signal_time
 
     def _save_signal(self, signal: Signal) -> None:
         if not self.db_path:
@@ -114,4 +140,23 @@ class SignalStore:
                         signal.created_at.isoformat(),
                         signal.model_dump_json(),
                     ),
+                )
+
+    def _trim_saved_signals(self) -> None:
+        if not self.db_path:
+            return
+
+        with closing(sqlite3.connect(self.db_path)) as connection:
+            with connection:
+                connection.execute(
+                    """
+                    DELETE FROM signals
+                    WHERE id NOT IN (
+                        SELECT id
+                        FROM signals
+                        ORDER BY created_at DESC
+                        LIMIT ?
+                    )
+                    """,
+                    (self.limit,),
                 )
