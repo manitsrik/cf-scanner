@@ -67,6 +67,7 @@ AUTO_WATCHLIST_SIZE=20
 WATCHLIST_REFRESH_SECONDS=900
 REST_REFRESH_SECONDS=900
 REST_CONCURRENCY=3
+BINANCE_WS_URL=wss://fstream.binance.com/market/stream
 SIGNAL_COOLDOWN_MINUTES=120
 SYSTEM_ALERT_COOLDOWN_MINUTES=30
 NEAR_CROSS_THRESHOLD_PCT=0.15
@@ -165,6 +166,7 @@ Do not commit `.env`. Use `.env.example` as the template.
 - `WATCHLIST_REFRESH_SECONDS`
 - `REST_REFRESH_SECONDS`
 - `REST_CONCURRENCY`
+- `BINANCE_WS_URL`
 - `SIGNAL_COOLDOWN_MINUTES`
 - `SYSTEM_ALERT_COOLDOWN_MINUTES`
 - `NEAR_CROSS_THRESHOLD_PCT`
@@ -178,4 +180,4 @@ Railway provides `PORT` automatically. The Dockerfile uses that value and falls 
 
 For Fly.io or Render, set the same Telegram environment variables in the platform dashboard if alerts are needed.
 
-The app uses websocket reconnect logic with exponential backoff.
+The app uses websocket reconnect logic with exponential backoff. Binance USD-M Futures market streams should use `wss://fstream.binance.com/market/stream`.

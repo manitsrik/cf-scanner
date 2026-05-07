@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     rest_concurrency: int = 3
     kline_limit: int = 250
     binance_rest_url: str = "https://fapi.binance.com"
-    binance_ws_url: str = "wss://fstream.binance.com/stream"
+    binance_ws_url: str = "wss://fstream.binance.com/market/stream"
     telegram_bot_token: str | None = None
     telegram_chat_id: str | None = None
     signal_db_path: str = "data/signals.db"
