@@ -2,7 +2,7 @@ import asyncio
 import json
 import logging
 from collections import deque
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import httpx
 import pandas as pd
@@ -51,6 +51,7 @@ class FuturesScanner:
         self._initial_load_completed_at: datetime | None = None
         self._last_message_at: datetime | None = None
         self._last_rest_refresh_at: datetime | None = None
+        self._rest_backoff_until: datetime | None = None
         self._watchlist_updated_at: datetime | None = None
         self._last_error: str | None = None
         self._events: deque[dict] = deque(maxlen=50)
@@ -68,6 +69,19 @@ class FuturesScanner:
 
     async def _refresh_candles_loop(self) -> None:
         while not self._stop_event.is_set():
+            if self._rest_backoff_until:
+                now = datetime.now(timezone.utc)
+                if now < self._rest_backoff_until:
+                    wait_seconds = (self._rest_backoff_until - now).total_seconds()
+                    self._last_error = (
+                        "Binance REST is cooling down after a rate-limit response. "
+                        f"Next REST refresh after {self._rest_backoff_until.isoformat()}."
+                    )
+                    self._record_event("warning", self._last_error)
+                    await asyncio.sleep(min(wait_seconds, self.settings.rest_refresh_seconds))
+                    continue
+                self._rest_backoff_until = None
+
             await self._refresh_watchlist()
             await self._load_initial_candles()
             await asyncio.sleep(self.settings.rest_refresh_seconds)
@@ -94,6 +108,7 @@ class FuturesScanner:
                 if isinstance(result, MarketDataError):
                     self._last_error = result.dashboard_message()
                     self._record_event("error", self._last_error)
+                    self._schedule_rest_backoff(result.status_code)
                     await self._send_system_alert(f"market-data:{result.status_code}", self._last_error)
                 else:
                     self._last_error = f"Initial candle load failed: {result}"
@@ -316,6 +331,7 @@ class FuturesScanner:
             else None,
             "last_message_at": self._last_message_at.isoformat() if self._last_message_at else None,
             "last_rest_refresh_at": self._last_rest_refresh_at.isoformat() if self._last_rest_refresh_at else None,
+            "rest_backoff_until": self._rest_backoff_until.isoformat() if self._rest_backoff_until else None,
             "watchlist_updated_at": self._watchlist_updated_at.isoformat() if self._watchlist_updated_at else None,
             "last_error": self._last_error,
             "signal_cooldown_minutes": self.settings.signal_cooldown_minutes,
@@ -520,6 +536,13 @@ class FuturesScanner:
                 "created_at": datetime.now(timezone.utc).isoformat(),
             }
         )
+
+    def _schedule_rest_backoff(self, status_code: int) -> None:
+        if status_code not in {418, 429}:
+            return
+        backoff_until = datetime.now(timezone.utc) + timedelta(seconds=self.settings.rest_backoff_seconds)
+        if self._rest_backoff_until is None or backoff_until > self._rest_backoff_until:
+            self._rest_backoff_until = backoff_until
 
     async def _send_system_alert(self, key: str, message: str) -> None:
         if not self.alerter.enabled:

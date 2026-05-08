@@ -63,10 +63,11 @@ TELEGRAM_CHAT_ID=your_chat_id
 SIGNAL_DB_PATH=data/signals.db
 SIGNAL_LIMIT=100
 AUTO_WATCHLIST_ENABLED=true
-AUTO_WATCHLIST_SIZE=20
-WATCHLIST_REFRESH_SECONDS=900
-REST_REFRESH_SECONDS=900
-REST_CONCURRENCY=3
+AUTO_WATCHLIST_SIZE=8
+WATCHLIST_REFRESH_SECONDS=3600
+REST_REFRESH_SECONDS=3600
+REST_CONCURRENCY=1
+REST_BACKOFF_SECONDS=7200
 BINANCE_WS_URL=wss://fstream.binance.com/market/stream
 SIGNAL_COOLDOWN_MINUTES=120
 SYSTEM_ALERT_COOLDOWN_MINUTES=30
@@ -124,7 +125,7 @@ By default the scanner builds an automatic watchlist from Binance USDT perpetual
 
 Set `AUTO_WATCHLIST_ENABLED=false` to scan only the fixed fallback list in `app/config.py`.
 
-`REST_REFRESH_SECONDS` controls how often the app reloads closed candles from Binance REST. The websocket handles live closed-candle updates between refreshes, so the default is intentionally conservative for hosted environments with shared outbound IPs. `REST_CONCURRENCY` limits simultaneous Binance REST requests.
+`REST_REFRESH_SECONDS` controls how often the app reloads closed candles from Binance REST. The websocket handles live closed-candle updates between refreshes, so the default is intentionally conservative for hosted environments with shared outbound IPs. `REST_CONCURRENCY` limits simultaneous Binance REST requests. `REST_BACKOFF_SECONDS` pauses REST refreshes after Binance returns HTTP 418 or 429 so the app does not keep hitting a temporarily blocked or rate-limited IP.
 
 ## Docker
 
@@ -166,6 +167,7 @@ Do not commit `.env`. Use `.env.example` as the template.
 - `WATCHLIST_REFRESH_SECONDS`
 - `REST_REFRESH_SECONDS`
 - `REST_CONCURRENCY`
+- `REST_BACKOFF_SECONDS`
 - `BINANCE_WS_URL`
 - `SIGNAL_COOLDOWN_MINUTES`
 - `SYSTEM_ALERT_COOLDOWN_MINUTES`

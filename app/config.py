@@ -12,10 +12,11 @@ class Settings(BaseSettings):
     symbols: list[str] = Field(default_factory=lambda: ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT"])
     timeframes: list[str] = Field(default_factory=lambda: ["15m", "30m", "1h"])
     auto_watchlist_enabled: bool = True
-    auto_watchlist_size: int = 20
-    watchlist_refresh_seconds: int = 900
-    rest_refresh_seconds: int = 900
-    rest_concurrency: int = 3
+    auto_watchlist_size: int = 8
+    watchlist_refresh_seconds: int = 3600
+    rest_refresh_seconds: int = 3600
+    rest_concurrency: int = 1
+    rest_backoff_seconds: int = 7200
     kline_limit: int = 250
     binance_rest_url: str = "https://fapi.binance.com"
     binance_ws_url: str = "wss://fstream.binance.com/market/stream"
