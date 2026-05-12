@@ -855,8 +855,11 @@ class FuturesScanner:
         self._last_market_bias_label = bias_label
         best_setups = self._best_setups(overview, [])
         thai_brief = self._thai_market_brief(overview, best_setups)
+        previous_badge = self._bias_badge(previous)
+        current_badge = self._bias_badge(bias_label)
         message = (
-            f"CF Scanner market bias changed: {previous} -> {bias_label}\n"
+            f"{current_badge} CF Scanner market bias changed\n"
+            f"{previous_badge} {previous} -> {current_badge} {bias_label}\n"
             f"Score: {overview.get('bias_score', 0):.0f}/100\n"
             f"Breadth: {overview.get('breadth_pct', 0):.0f}% up\n"
             f"Average gain: {overview.get('average_change_pct', 0):+.2f}%\n\n"
@@ -864,6 +867,16 @@ class FuturesScanner:
         )
         self._record_event("info", message)
         await self._send_system_alert("market-bias", message)
+
+    @staticmethod
+    def _bias_badge(label: str | None) -> str:
+        if label == "Long Bias":
+            return "🟢"
+        if label == "Short Bias":
+            return "🔴"
+        if label == "Neutral":
+            return "🟡"
+        return "⚪"
 
     @staticmethod
     def _timeframe_seconds(timeframe: str) -> int:
