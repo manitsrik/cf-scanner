@@ -727,6 +727,77 @@ class FuturesScanner:
             return 65
         return 35
 
+    def _thai_market_brief(self, overview: dict, best_setups: list[dict] | None = None) -> str:
+        movers = overview.get("movers", [])
+        if not movers:
+            return "กำลังสรุปภาพรวมตลาด: ยังรอข้อมูล candles ให้ครบก่อน"
+
+        gainers = int(overview.get("gainers", 0) or 0)
+        losers = int(overview.get("losers", 0) or 0)
+        flat = int(overview.get("flat", 0) or 0)
+        total = gainers + losers + flat or len(movers)
+        average = float(overview.get("average_change_pct", 0) or 0)
+        breadth = float(overview.get("breadth_pct", 0) or 0)
+        bias_score = float(overview.get("bias_score", 0) or 0)
+        top_gainer = movers[0]
+        top_loser = movers[-1]
+        risk_flags = overview.get("risk", {}).get("flags", [])
+        risk_text = risk_flags[0] if risk_flags else "ความเสี่ยงปกติสำหรับ watchlist ปัจจุบัน"
+        setups = (best_setups or [])[:3]
+        setup_text = (
+            ", ".join(
+                f"{setup['symbol']} ({self._thai_side_text(setup.get('side'))} {float(setup.get('score', 0)):.0f})"
+                for setup in setups
+            )
+            if setups
+            else "ยังไม่มีเหรียญเด่นจากคะแนนรวม"
+        )
+        action_text = self._thai_action_text(overview.get("bias_label"))
+
+        return (
+            "Thai Market Brief\n"
+            f"ภาพรวม: ตลาดตอนนี้{self._thai_bias_text(overview.get('bias_label'))} "
+            f"คะแนน {bias_score:.0f}/100 โดยมีเหรียญบวก {gainers}/{total} ตัว, "
+            f"breadth {breadth:.0f}% และ average gain {self._format_percent(average)}\n"
+            f"เหรียญน่าดู: {setup_text}\n"
+            f"แรงนำ/แรงอ่อน: {top_gainer['symbol']} {self._format_percent(top_gainer.get('change_pct', 0))} เด่นสุด "
+            f"ส่วน {top_loser['symbol']} {self._format_percent(top_loser.get('change_pct', 0))} อ่อนสุด\n"
+            f"ความเสี่ยง: {risk_text}\n"
+            f"แผน: {action_text}"
+        )
+
+    @staticmethod
+    def _format_percent(value: float) -> str:
+        number = float(value or 0)
+        sign = "+" if number > 0 else ""
+        return f"{sign}{number:.2f}%"
+
+    @staticmethod
+    def _thai_bias_text(label: str | None) -> str:
+        if label == "Long Bias":
+            return "เอนเอียงฝั่ง Long"
+        if label == "Short Bias":
+            return "เอนเอียงฝั่ง Short"
+        if label == "Neutral":
+            return "เป็นกลาง"
+        return "กำลังโหลด"
+
+    @staticmethod
+    def _thai_side_text(side: str | None) -> str:
+        if side == "LONG":
+            return "Long"
+        if side == "SHORT":
+            return "Short"
+        return "ดูกราฟ"
+
+    @staticmethod
+    def _thai_action_text(label: str | None) -> str:
+        if label == "Long Bias":
+            return "เน้นหา Long จาก Best Setups หรือ Near Setup และหลีกเลี่ยงการไล่ราคา"
+        if label == "Short Bias":
+            return "เน้นหา Short จากเหรียญที่อ่อนกว่าตลาด และรอ confirmation ก่อนเข้า"
+        return "รอ confirmation ลดขนาดไม้ และเลือกเทรดเฉพาะ setup ที่ชัด"
+
     async def _maybe_send_market_bias_alert(self) -> None:
         overview = self._market_overview()
         bias_label = overview.get("bias_label")
@@ -740,11 +811,14 @@ class FuturesScanner:
 
         previous = self._last_market_bias_label
         self._last_market_bias_label = bias_label
+        best_setups = self._best_setups(overview, [])
+        thai_brief = self._thai_market_brief(overview, best_setups)
         message = (
             f"CF Scanner market bias changed: {previous} -> {bias_label}\n"
             f"Score: {overview.get('bias_score', 0):.0f}/100\n"
             f"Breadth: {overview.get('breadth_pct', 0):.0f}% up\n"
-            f"Average gain: {overview.get('average_change_pct', 0):+.2f}%"
+            f"Average gain: {overview.get('average_change_pct', 0):+.2f}%\n\n"
+            f"{thai_brief}"
         )
         self._record_event("info", message)
         await self._send_system_alert("market-bias", message)

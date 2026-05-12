@@ -21,7 +21,7 @@ This app does not place trades, does not use private Binance API keys, and does 
 - Color status badges, system event log, and Telegram system alerts
 - Market Overview gauge, risk panel, top movers, and opportunity-ranked best setups
 - Thai Market Brief summary generated from the current market overview, risk checks, and best setups
-- Telegram system alert when market bias changes
+- Telegram system alert with Thai Market Brief when market bias changes
 - Docker-ready deployment
 
 ## Signal Rules
