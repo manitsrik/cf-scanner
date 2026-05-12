@@ -13,7 +13,7 @@ class Settings(BaseSettings):
     symbols: list[str] = Field(default_factory=lambda: ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT"])
     timeframes: list[str] = Field(default_factory=lambda: ["15m", "30m", "1h"])
     auto_watchlist_enabled: bool = True
-    auto_watchlist_size: int = 8
+    auto_watchlist_size: int = 20
     watchlist_refresh_seconds: int = 3600
     rest_refresh_seconds: int = 3600
     rest_concurrency: int = 1

@@ -63,7 +63,7 @@ TELEGRAM_CHAT_ID=your_chat_id
 SIGNAL_DB_PATH=data/signals.db
 SIGNAL_LIMIT=100
 AUTO_WATCHLIST_ENABLED=true
-AUTO_WATCHLIST_SIZE=8
+AUTO_WATCHLIST_SIZE=20
 WATCHLIST_REFRESH_SECONDS=3600
 REST_REFRESH_SECONDS=3600
 REST_CONCURRENCY=1
@@ -121,7 +121,14 @@ Keep `data/` out of git because it contains runtime state. On hosted platforms w
 
 ## Watchlist
 
-By default the scanner builds an automatic watchlist from Binance USDT perpetual futures. It ranks markets by 24h `quoteVolume` and scans the top `AUTO_WATCHLIST_SIZE` symbols.
+By default the scanner builds an automatic watchlist from Binance USDT perpetual futures. It ranks markets by 24h `quoteVolume` and scans the top `AUTO_WATCHLIST_SIZE` symbols. The default is `20`, which gives the Market Overview gauge a broader read than the original 8-symbol watchlist while still keeping Binance REST usage modest.
+
+The dashboard separates market context from trade triggers:
+
+- Market Overview gauge: broad 24h market bias from the active watchlist.
+- Top movers: strongest gainers and losers inside the active watchlist.
+- Near Setups: markets close to the scanner rules but not crossed yet.
+- Signals: closed-candle setups that passed all configured checks.
 
 Set `AUTO_WATCHLIST_ENABLED=false` to scan only the fixed fallback list in `app/config.py`.
 
