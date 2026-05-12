@@ -404,6 +404,53 @@
         text-align: right;
       }
 
+      .decision-grid {
+        display: grid;
+        gap: 10px;
+        grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr);
+      }
+
+      .decision-panel {
+        background: var(--surface-muted);
+        border: 1px solid var(--border-soft);
+        border-radius: 7px;
+        display: grid;
+        gap: 10px;
+        padding: 12px;
+      }
+
+      .setup-list,
+      .risk-list {
+        display: grid;
+        gap: 8px;
+      }
+
+      .setup-row {
+        align-items: center;
+        display: grid;
+        gap: 10px;
+        grid-template-columns: 94px 68px 76px minmax(120px, 1fr) 54px;
+      }
+
+      .setup-score {
+        font-size: 13px;
+        font-weight: 850;
+      }
+
+      .setup-reasons {
+        color: var(--muted);
+        font-size: 12px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .risk-item {
+        color: var(--muted);
+        font-size: 13px;
+        line-height: 1.35;
+      }
+
       [data-theme="dark"] .state-warn {
         background: #422006;
         color: #fde68a;
@@ -695,6 +742,10 @@
           grid-template-columns: 1fr;
         }
 
+        .decision-grid {
+          grid-template-columns: 1fr;
+        }
+
         .metric.wide {
           grid-column: span 3;
         }
@@ -729,6 +780,15 @@
 
         .mover-row {
           grid-template-columns: 82px minmax(90px, 1fr) 68px;
+        }
+
+        .setup-row {
+          grid-template-columns: 76px 62px 66px 1fr;
+        }
+
+        .setup-row .link-button {
+          grid-column: 1 / -1;
+          justify-content: flex-start;
         }
 
         .metric.wide {
@@ -891,6 +951,25 @@
           </div>
           <div class="mover-list" id="marketMovers">
             <div class="muted">Loading market overview...</div>
+          </div>
+          <div class="decision-grid">
+            <div class="decision-panel">
+              <div>
+                <span class="metric-label">Best Setups Now</span>
+              </div>
+              <div class="setup-list" id="bestSetups">
+                <div class="muted">Waiting for setup ranking...</div>
+              </div>
+            </div>
+            <div class="decision-panel">
+              <div>
+                <span class="metric-label">Risk Panel</span>
+                <span class="overview-value" id="riskLevel">Loading</span>
+              </div>
+              <div class="risk-list" id="riskFlags">
+                <div class="muted">Waiting for risk checks...</div>
+              </div>
+            </div>
           </div>
         </div>
       </section>
@@ -1075,6 +1154,9 @@
       const marketBreadthFillEl = document.getElementById("marketBreadthFill");
       const marketCountsEl = document.getElementById("marketCounts");
       const marketMoversEl = document.getElementById("marketMovers");
+      const bestSetupsEl = document.getElementById("bestSetups");
+      const riskLevelEl = document.getElementById("riskLevel");
+      const riskFlagsEl = document.getElementById("riskFlags");
       const watchlistStateEl = document.getElementById("watchlistState");
       const watchlistUpdatedEl = document.getElementById("watchlistUpdated");
       const systemLogEl = document.getElementById("systemLog");
@@ -1464,7 +1546,7 @@
       function renderMarketOverview(overview) {
         const movers = overview?.movers || [];
         if (!overview || !movers.length) {
-          marketBiasNeedleEl.style.transform = "translateX(-50%) rotate(0deg)";
+          marketBiasNeedleEl.style.transform = "rotate(0deg)";
           marketBiasLabelEl.textContent = "Loading";
           marketBiasScoreEl.textContent = "Waiting for candles";
           marketDirectionEl.textContent = "Loading";
@@ -1473,6 +1555,8 @@
           marketBreadthFillEl.style.width = "0%";
           marketCountsEl.textContent = "Loading";
           marketMoversEl.innerHTML = '<div class="muted">Waiting for market candles...</div>';
+          riskLevelEl.textContent = "Loading";
+          riskFlagsEl.innerHTML = '<div class="muted">Waiting for risk checks...</div>';
           return;
         }
 
@@ -1506,6 +1590,39 @@
                   <div class="mover-fill ${direction}" style="width: ${width}%"></div>
                 </div>
                 <span class="mover-change ${change >= 0 ? "state-ok" : "state-error"}">${formatPercent(change)}</span>
+              </div>
+            `;
+          })
+          .join("");
+
+        const risk = overview.risk || {};
+        const riskState = risk.level === "High" ? "error" : risk.level === "Moderate" ? "warn" : "ok";
+        setStateValue(riskLevelEl, risk.level || "Loading", riskState);
+        riskFlagsEl.innerHTML = (risk.flags || ["Waiting for risk checks..."])
+          .map((flag) => `<div class="risk-item">${escapeHtml(flag)}</div>`)
+          .join("");
+      }
+
+      function renderBestSetups(setups) {
+        if (!setups || !setups.length) {
+          bestSetupsEl.innerHTML = '<div class="muted">No ranked setups yet.</div>';
+          return;
+        }
+
+        bestSetupsEl.innerHTML = setups
+          .slice(0, 6)
+          .map((setup) => {
+            const sideClass = setup.side === "LONG" ? "LONG" : "SHORT";
+            const scoreState = setup.score >= 70 ? "ok" : setup.score >= 50 ? "warn" : "muted";
+            return `
+              <div class="setup-row">
+                <span class="mover-symbol">${escapeHtml(setup.symbol)}</span>
+                <span class="badge ${sideClass}">${escapeHtml(setup.side)}</span>
+                <span class="setup-score state-${scoreState}">${Number(setup.score).toFixed(0)}/100</span>
+                <span class="setup-reasons" title="${escapeHtml((setup.reasons || []).join(", "))}">
+                  ${escapeHtml((setup.reasons || []).join(", "))}
+                </span>
+                ${chartButton(setup.symbol, setup.timeframe)}
               </div>
             `;
           })
@@ -1553,6 +1670,7 @@
         watchlistUpdatedEl.textContent = formatTime(status.watchlist_updated_at);
         renderSystemLog(status.events || []);
         renderMarketOverview(status.market_overview);
+        renderBestSetups(status.best_setups || []);
         currentNearSetups = status.near_setups || [];
         renderNearSetups();
 
@@ -1596,6 +1714,7 @@
 
         if (statusResult.status === "rejected") {
           renderMarketOverview(null);
+          renderBestSetups([]);
           scannerPairsEl.innerHTML = `<tr><td class="empty" colspan="5">Scanner status unavailable: ${escapeHtml(
             statusResult.reason?.message || "Unknown error"
           )}</td></tr>`;

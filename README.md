@@ -19,6 +19,8 @@ This app does not place trades, does not use private Binance API keys, and does 
 - Signal cooldown and near-setup monitoring
 - Runtime health metrics for market data freshness
 - Color status badges, system event log, and Telegram system alerts
+- Market Overview gauge, risk panel, top movers, and opportunity-ranked best setups
+- Telegram system alert when market bias changes
 - Docker-ready deployment
 
 ## Signal Rules
@@ -127,6 +129,8 @@ The dashboard separates market context from trade triggers:
 
 - Market Overview gauge: broad 24h market bias from the active watchlist.
 - Top movers: strongest gainers and losers inside the active watchlist.
+- Risk Panel: contextual warnings such as neutral breadth, extended movers, or BTC/ETH disagreement.
+- Best Setups Now: opportunity ranking from market bias, 24h momentum, RSI quality, volume ratio, trend alignment, liquidity rank, and near-setup status.
 - Near Setups: markets close to the scanner rules but not crossed yet.
 - Signals: closed-candle setups that passed all configured checks.
 

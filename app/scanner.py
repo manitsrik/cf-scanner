@@ -56,6 +56,7 @@ class FuturesScanner:
         self._last_error: str | None = None
         self._events: deque[dict] = deque(maxlen=50)
         self._last_alert_at: dict[str, datetime] = {}
+        self._last_market_bias_label: str | None = None
         self._websocket_connected = False
         self._watchlist_version = 0
 
@@ -128,6 +129,7 @@ class FuturesScanner:
             self._last_error = None
         self._initial_load_completed_at = datetime.now(timezone.utc)
         self._last_rest_refresh_at = self._initial_load_completed_at
+        await self._maybe_send_market_bias_alert()
 
     async def _refresh_watchlist(self) -> None:
         if not self.settings.auto_watchlist_enabled:
@@ -257,6 +259,7 @@ class FuturesScanner:
             if signal and self.store.add_if_new(signal, self.settings.signal_cooldown_minutes):
                 logger.info("New %s signal for %s %s.", signal.signal_type, symbol, timeframe)
                 await self.alerter.send_signal(signal)
+            await self._maybe_send_market_bias_alert()
         except (KeyError, ValueError, TypeError, json.JSONDecodeError):
             self._last_error = "Failed to parse websocket message."
             self._record_event("warning", self._last_error)
@@ -318,6 +321,9 @@ class FuturesScanner:
         else:
             market_data_status = "OK"
 
+        market_overview = self._market_overview()
+        best_setups = self._best_setups(market_overview, near_setups)
+
         return {
             "running": self._started_at is not None and not self._stop_event.is_set(),
             "websocket_connected": self._websocket_connected,
@@ -342,7 +348,8 @@ class FuturesScanner:
             "latest_closed_candle_at": latest_closed_candle_at.isoformat() if latest_closed_candle_at else None,
             "events": list(self._events),
             "near_setups": near_setups,
-            "market_overview": self._market_overview(),
+            "market_overview": market_overview,
+            "best_setups": best_setups,
             "pairs": pairs,
         }
 
@@ -583,7 +590,164 @@ class FuturesScanner:
             "losers": losers,
             "flat": len(movers) - gainers - losers,
             "movers": sorted(movers, key=lambda item: item["change_pct"], reverse=True),
+            "risk": self._market_risk(direction, bias_label, breadth_pct, average_change_pct, movers),
         }
+
+    def _best_setups(self, overview: dict, near_setups: list[dict]) -> list[dict]:
+        timeframe = overview.get("timeframe") or (self.settings.timeframes[0] if self.settings.timeframes else "15m")
+        movers = {item["symbol"]: item for item in overview.get("movers", [])}
+        near_by_symbol = {item["symbol"]: item for item in near_setups if item.get("timeframe") == timeframe}
+        bias_label = overview.get("bias_label", "Neutral")
+        opportunities = []
+
+        for rank, symbol in enumerate(self._active_symbols):
+            candles = self._candles.get((symbol, timeframe))
+            if candles is None or len(candles) < 200 or symbol not in movers:
+                continue
+            indicators = self._indicator_snapshot(candles)
+            if not indicators:
+                continue
+
+            mover = movers[symbol]
+            change_pct = float(mover.get("change_pct", 0))
+            setup = near_by_symbol.get(symbol)
+            side = self._preferred_side(bias_label, change_pct, indicators)
+            trend_aligned = (
+                side == "LONG" and indicators["price"] > indicators["ema_200"]
+            ) or (
+                side == "SHORT" and indicators["price"] < indicators["ema_200"]
+            )
+            momentum_score = self._clamp(abs(change_pct) / 4 * 100, 0, 100)
+            if side == "LONG" and change_pct < 0:
+                momentum_score *= 0.35
+            if side == "SHORT" and change_pct > 0:
+                momentum_score *= 0.35
+            rsi_score = self._rsi_quality_score(side, indicators["rsi_14"])
+            volume_score = self._clamp(indicators["volume_ratio"] / 1.5 * 100, 0, 100)
+            liquidity_score = 100 - (rank / max(1, len(self._active_symbols) - 1) * 30)
+            setup_bonus = 20 if setup and setup.get("setup_type") == side else 0
+            trend_bonus = 12 if trend_aligned else -10
+            score = self._clamp(
+                momentum_score * 0.28
+                + rsi_score * 0.2
+                + volume_score * 0.16
+                + liquidity_score * 0.16
+                + setup_bonus
+                + trend_bonus,
+                0,
+                100,
+            )
+            reasons = []
+            if setup and setup.get("setup_type") == side:
+                reasons.append("near setup")
+            if trend_aligned:
+                reasons.append("trend aligned")
+            if indicators["volume_ratio"] >= self.settings.near_volume_ratio_min:
+                reasons.append(f"volume {indicators['volume_ratio']:.2f}x")
+            reasons.append(f"24h {change_pct:+.2f}%")
+
+            opportunities.append(
+                {
+                    "symbol": symbol,
+                    "timeframe": timeframe,
+                    "side": side,
+                    "score": score,
+                    "change_pct": change_pct,
+                    "rsi": indicators["rsi_14"],
+                    "volume_ratio": indicators["volume_ratio"],
+                    "trend_aligned": trend_aligned,
+                    "near_setup": setup.get("setup_type") if setup else None,
+                    "reasons": reasons,
+                    "tradingview_url": f"https://www.tradingview.com/chart/?symbol=BINANCE:{symbol}.P",
+                }
+            )
+
+        return sorted(opportunities, key=lambda item: item["score"], reverse=True)[:10]
+
+    def _market_risk(
+        self,
+        direction: str,
+        bias_label: str,
+        breadth_pct: float,
+        average_change_pct: float,
+        movers: list[dict],
+    ) -> dict:
+        flags = []
+        level = "Low"
+        if bias_label == "Neutral":
+            flags.append("Bias is neutral: reduce size and wait for confirmation.")
+            level = "Moderate"
+        if 45 <= breadth_pct <= 55:
+            flags.append("Breadth is balanced: avoid forcing directional trades.")
+            level = "Moderate"
+        if movers:
+            max_abs_move = max(abs(float(item.get("change_pct", 0))) for item in movers)
+            if max_abs_move >= 8:
+                flags.append("One or more movers are extended: avoid chasing late entries.")
+                level = "High"
+        btc = next((item for item in movers if item.get("symbol") == "BTCUSDT"), None)
+        eth = next((item for item in movers if item.get("symbol") == "ETHUSDT"), None)
+        if btc and eth and float(btc["change_pct"]) * float(eth["change_pct"]) < 0:
+            flags.append("BTC and ETH disagree: expect choppy alt moves.")
+            level = "High" if level == "Moderate" else "Moderate"
+        if direction == "Up" and average_change_pct < 0.15:
+            flags.append("Market is up, but average gain is thin.")
+            level = "Moderate"
+        if not flags:
+            flags.append("Risk is normal for the current watchlist.")
+        return {"level": level, "flags": flags}
+
+    @staticmethod
+    def _preferred_side(bias_label: str, change_pct: float, indicators: dict) -> str:
+        if bias_label == "Long Bias":
+            return "LONG"
+        if bias_label == "Short Bias":
+            return "SHORT"
+        if change_pct > 0 and indicators["price"] > indicators["ema_200"]:
+            return "LONG"
+        if change_pct < 0 and indicators["price"] < indicators["ema_200"]:
+            return "SHORT"
+        return "LONG" if change_pct >= 0 else "SHORT"
+
+    @staticmethod
+    def _rsi_quality_score(side: str, rsi: float) -> float:
+        if side == "LONG":
+            if 50 <= rsi <= 68:
+                return 100
+            if 45 <= rsi < 50:
+                return 70
+            if 68 < rsi <= 75:
+                return 65
+            return 35
+        if 32 <= rsi <= 50:
+            return 100
+        if 50 < rsi <= 55:
+            return 70
+        if 25 <= rsi < 32:
+            return 65
+        return 35
+
+    async def _maybe_send_market_bias_alert(self) -> None:
+        overview = self._market_overview()
+        bias_label = overview.get("bias_label")
+        if bias_label in {None, "Loading"}:
+            return
+        if self._last_market_bias_label is None:
+            self._last_market_bias_label = bias_label
+            return
+        if bias_label == self._last_market_bias_label:
+            return
+
+        previous = self._last_market_bias_label
+        self._last_market_bias_label = bias_label
+        message = (
+            f"CF Scanner market bias changed: {previous} -> {bias_label}\n"
+            f"Score: {overview.get('bias_score', 0):.0f}/100\n"
+            f"Breadth: {overview.get('breadth_pct', 0):.0f}% up\n"
+            f"Average gain: {overview.get('average_change_pct', 0):+.2f}%"
+        )
+        self._record_event("info", message)
+        await self._send_system_alert("market-bias", message)
 
     @staticmethod
     def _timeframe_seconds(timeframe: str) -> int:
@@ -596,6 +760,10 @@ class FuturesScanner:
     @staticmethod
     def _stale_after_seconds(timeframe: str) -> int:
         return FuturesScanner._timeframe_seconds(timeframe) * 3
+
+    @staticmethod
+    def _clamp(value: float, minimum: float, maximum: float) -> float:
+        return max(minimum, min(maximum, value))
 
     def _record_event(self, level: str, message: str) -> None:
         self._events.appendleft(
