@@ -273,14 +273,14 @@
       .gauge-needle {
         background: var(--text);
         border-radius: 999px;
-        bottom: 0;
-        height: 4px;
-        left: 50%;
+        bottom: 2px;
+        height: 80%;
+        left: calc(50% - 2px);
         position: absolute;
-        transform: translateX(-50%) rotate(0deg);
-        transform-origin: left center;
+        transform: rotate(0deg);
+        transform-origin: 50% 100%;
         transition: transform 180ms ease;
-        width: 42%;
+        width: 4px;
         z-index: 2;
       }
 
@@ -1479,12 +1479,12 @@
         const average = Number(overview.average_change_pct || 0);
         const breadth = Math.max(0, Math.min(100, Number(overview.breadth_pct || 0)));
         const biasScore = Math.max(0, Math.min(100, Number(overview.bias_score ?? 50)));
-        const biasAngle = biasScore / 100 * 180 - 180;
+        const biasAngle = biasScore / 100 * 180 - 90;
         const directionState =
           overview.direction === "Up" ? "ok" : overview.direction === "Down" ? "error" : "warn";
         const biasState =
           overview.bias_label === "Long Bias" ? "ok" : overview.bias_label === "Short Bias" ? "error" : "warn";
-        marketBiasNeedleEl.style.transform = `translateX(-50%) rotate(${biasAngle}deg)`;
+        marketBiasNeedleEl.style.transform = `rotate(${biasAngle}deg)`;
         setStateValue(marketBiasLabelEl, overview.bias_label || "Neutral", biasState);
         marketBiasScoreEl.textContent = `Score ${biasScore.toFixed(0)}/100 from 24h breadth and average gain`;
         setStateValue(marketDirectionEl, overview.direction, directionState);
