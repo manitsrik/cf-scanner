@@ -202,8 +202,6 @@ class CryptoNewsService:
 
     @staticmethod
     def _contains_term(text: str, term: str) -> bool:
-        if len(term) <= 2:
-            return re.search(rf"(?<![a-z0-9]){re.escape(term)}(?![a-z0-9])", text) is not None
         return re.search(rf"(?<![a-z0-9]){re.escape(term)}(?![a-z0-9])", text) is not None
 
     @staticmethod
@@ -215,22 +213,97 @@ class CryptoNewsService:
     @staticmethod
     def _classify(item: dict, matched_symbols: list[str]) -> dict:
         text = f"{item.get('title', '')} {item.get('summary', '')}".lower()
-        positive = sum(1 for keyword in POSITIVE_KEYWORDS if keyword in text)
-        negative = sum(1 for keyword in NEGATIVE_KEYWORDS if keyword in text)
+        positive_hits = sorted(keyword for keyword in POSITIVE_KEYWORDS if keyword in text)
+        negative_hits = sorted(keyword for keyword in NEGATIVE_KEYWORDS if keyword in text)
+        high_hits = sorted(keyword for keyword in HIGH_IMPACT_KEYWORDS if keyword in text)
+
         sentiment = "Neutral"
-        if positive > negative:
+        if len(positive_hits) > len(negative_hits):
             sentiment = "Bullish"
-        elif negative > positive:
+        elif len(negative_hits) > len(positive_hits):
             sentiment = "Bearish"
 
-        impact = "High" if any(keyword in text for keyword in HIGH_IMPACT_KEYWORDS) else "Normal"
+        impact = "High" if high_hits else "Normal"
+        strength = CryptoNewsService._effect_strength(sentiment, len(positive_hits), len(negative_hits), impact)
         if matched_symbols:
             impact_reason = f"เกี่ยวกับ {', '.join(matched_symbols[:3])}"
         elif impact == "High":
             impact_reason = "ข่าวระดับตลาดที่อาจกระทบหลายเหรียญ"
         else:
             impact_reason = "ข่าวภาพรวมตลาด"
-        return {"sentiment": sentiment, "impact": impact, "impact_reason": impact_reason}
+
+        targets = matched_symbols or ["Market"]
+        coin_impacts = [
+            {
+                "symbol": symbol,
+                "direction": sentiment,
+                "strength": strength,
+                "explanation": CryptoNewsService._thai_effect_explanation(
+                    symbol=symbol,
+                    sentiment=sentiment,
+                    strength=strength,
+                    positive_hits=positive_hits,
+                    negative_hits=negative_hits,
+                    high_hits=high_hits,
+                ),
+                "trade_note": CryptoNewsService._trade_note(sentiment, strength),
+            }
+            for symbol in targets[:4]
+        ]
+        return {
+            "sentiment": sentiment,
+            "impact": impact,
+            "impact_reason": impact_reason,
+            "effect_strength": strength,
+            "coin_impacts": coin_impacts,
+        }
+
+    @staticmethod
+    def _effect_strength(sentiment: str, positive: int, negative: int, impact: str) -> str:
+        if sentiment == "Neutral":
+            return "Watch"
+        if impact == "High" or abs(positive - negative) >= 2:
+            return "Strong"
+        return "Mild"
+
+    @staticmethod
+    def _thai_effect_explanation(
+        symbol: str,
+        sentiment: str,
+        strength: str,
+        positive_hits: list[str],
+        negative_hits: list[str],
+        high_hits: list[str],
+    ) -> str:
+        target = "ตลาดรวม" if symbol == "Market" else symbol
+        if sentiment == "Bullish":
+            reason = CryptoNewsService._keyword_reason(positive_hits, high_hits)
+            tone = "บวกแรง" if strength == "Strong" else "บวกอ่อน"
+            return f"{target}: ประเมินเป็น{tone} เพราะข่าวมีคำ/ประเด็นเชิงบวก เช่น {reason}"
+        if sentiment == "Bearish":
+            reason = CryptoNewsService._keyword_reason(negative_hits, high_hits)
+            tone = "ลบแรง" if strength == "Strong" else "ลบอ่อน"
+            return f"{target}: ประเมินเป็น{tone} เพราะข่าวมีคำ/ประเด็นเสี่ยง เช่น {reason}"
+        if high_hits:
+            return f"{target}: ยังไม่ชัดว่าบวกหรือลบ แต่เป็นข่าวสำคัญเรื่อง {', '.join(high_hits[:3])} อาจทำให้ผันผวน"
+        return f"{target}: ผลกระทบยังเป็นกลาง ใช้เป็นบริบทประกอบ ไม่ควรใช้เข้าเทรดเดี่ยว ๆ"
+
+    @staticmethod
+    def _keyword_reason(primary_hits: list[str], high_hits: list[str]) -> str:
+        terms = primary_hits[:2] + [term for term in high_hits[:2] if term not in primary_hits[:2]]
+        return ", ".join(terms[:3]) if terms else "sentiment ของพาดหัวข่าว"
+
+    @staticmethod
+    def _trade_note(sentiment: str, strength: str) -> str:
+        if sentiment == "Bullish" and strength == "Strong":
+            return "ถ้าเทคนิคให้ Long อยู่แล้ว ให้รอ candle confirm และเลี่ยงไล่ราคาหลังข่าว"
+        if sentiment == "Bullish":
+            return "ช่วยหนุนฝั่ง Long ได้เล็กน้อย แต่ยังต้องดู Best Setup และ RSI"
+        if sentiment == "Bearish" and strength == "Strong":
+            return "ถ้ามี Long signal ให้ลดขนาดไม้หรือรอความผันผวนสงบก่อน"
+        if sentiment == "Bearish":
+            return "เพิ่มความระวังฝั่ง Long และรอ confirmation ให้ชัดกว่าเดิม"
+        return "ยังไม่ควรเปลี่ยนแผนเทรดจากข่าวนี้ ให้ใช้ technical signal เป็นหลัก"
 
     @staticmethod
     def _summary(items: list[dict]) -> str:
@@ -240,7 +313,7 @@ class CryptoNewsService:
         bearish = sum(1 for item in items if item.get("sentiment") == "Bearish")
         bullish = sum(1 for item in items if item.get("sentiment") == "Bullish")
         if high:
-            return f"พบข่าวสำคัญ {high} ข่าว ควรตรวจข่าวก่อนเข้าไม้"
+            return f"พบข่าวสำคัญ {high} ข่าว ควรตรวจผลกระทบก่อนเข้าไม้"
         if bullish > bearish:
             return "โทนข่าวเอนไปทางบวก แต่ยังใช้ signal เป็นตัวตัดสินหลัก"
         if bearish > bullish:

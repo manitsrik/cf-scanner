@@ -466,6 +466,22 @@
         color: var(--muted);
       }
 
+      .news-effect {
+        background: var(--surface);
+        border: 1px solid var(--border-soft);
+        border-radius: 6px;
+        color: var(--text);
+        display: grid;
+        font-size: 12px;
+        gap: 3px;
+        line-height: 1.35;
+        padding: 7px 8px;
+      }
+
+      .news-effect-note {
+        color: var(--muted);
+      }
+
       .mover-row {
         align-items: center;
         display: grid;
@@ -2052,6 +2068,73 @@
         }
 
         renderSignals();
+      }
+
+      function newsSentimentText(sentiment) {
+        if (sentiment === "Bullish") return "บวก";
+        if (sentiment === "Bearish") return "ลบ";
+        return "กลาง";
+      }
+
+      function newsStrengthText(strength) {
+        if (strength === "Strong") return "แรง";
+        if (strength === "Mild") return "อ่อน";
+        return "เฝ้าดู";
+      }
+
+      function renderNewsImpact(news) {
+        const items = news?.items || [];
+        newsImpactSummaryEl.textContent = news?.summary || "ยังไม่มีข่าวที่ตรงกับ watchlist";
+        if (!items.length) {
+          setStateValue(newsImpactStateEl, "No match", "muted");
+          newsImpactListEl.innerHTML = '<div class="muted">ยังไม่พบข่าวที่ตรงกับ watchlist ในรอบนี้</div>';
+          return;
+        }
+
+        const highCount = items.filter((item) => item.impact === "High").length;
+        const bearishCount = items.filter((item) => item.sentiment === "Bearish").length;
+        const bullishCount = items.filter((item) => item.sentiment === "Bullish").length;
+        const state = highCount || bearishCount > bullishCount ? "warn" : bullishCount > bearishCount ? "ok" : "muted";
+        setStateValue(newsImpactStateEl, highCount ? `${highCount} high impact` : `${items.length} updates`, state);
+
+        newsImpactListEl.innerHTML = items
+          .slice(0, 5)
+          .map((item) => {
+            const symbols = (item.symbols || []).length ? item.symbols.slice(0, 3).join(", ") : "Market";
+            const impactClass = item.impact === "High" ? "high" : "normal";
+            const sentimentClass = String(item.sentiment || "Neutral").toLowerCase();
+            const primaryImpact = (item.coin_impacts || [])[0];
+            const strengthText = primaryImpact ? newsStrengthText(primaryImpact.strength) : "";
+            const effectLabel =
+              primaryImpact && strengthText !== "เฝ้าดู"
+                ? `${newsSentimentText(primaryImpact.direction)} ${strengthText}`
+                : newsSentimentText(primaryImpact?.direction);
+            const effectHtml = primaryImpact
+              ? `
+                <div class="news-effect">
+                  <div><strong>${escapeHtml(primaryImpact.symbol)}:</strong> ${escapeHtml(effectLabel)}</div>
+                  <div>${escapeHtml(primaryImpact.explanation)}</div>
+                  <div class="news-effect-note">${escapeHtml(primaryImpact.trade_note)}</div>
+                </div>
+              `
+              : "";
+            return `
+              <div class="news-row">
+                <a class="news-title" href="${escapeHtml(item.url || "#")}" target="_blank" rel="noreferrer">
+                  ${escapeHtml(item.title)}
+                </a>
+                <div class="news-meta">
+                  <span>${escapeHtml(item.source || "News")}</span>
+                  <span>${escapeHtml(symbols)}</span>
+                  <span class="news-tag ${impactClass}">${item.impact === "High" ? "สำคัญ" : "ทั่วไป"}</span>
+                  <span class="news-tag ${sentimentClass}">${newsSentimentText(item.sentiment)}</span>
+                  <span>${escapeHtml(item.impact_reason || "")}</span>
+                </div>
+                ${effectHtml}
+              </div>
+            `;
+          })
+          .join("");
       }
 
       async function loadNews() {

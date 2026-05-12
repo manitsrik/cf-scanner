@@ -135,7 +135,7 @@ The dashboard separates market context from trade triggers:
 
 - Market Overview gauge: broad 24h market bias from the active watchlist.
 - Thai Market Brief: plain Thai summary of the current bias, focus coins, risk, and action plan.
-- News Impact: RSS-based crypto news context matched to the active watchlist, with simple impact and sentiment labels.
+- News Impact: RSS-based crypto news context matched to the active watchlist, with simple impact, sentiment, coin impact, and Thai trading-context notes.
 - Top movers: strongest gainers and losers inside the active watchlist.
 - Risk Panel: Thai contextual warnings such as neutral breadth, extended movers, or BTC/ETH disagreement.
 - Best Setups Now: opportunity ranking from market bias, 24h momentum, RSI quality, volume ratio, trend alignment, liquidity rank, and near-setup status.
