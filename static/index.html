@@ -119,6 +119,14 @@
         width: 8px;
       }
 
+      .live-pill.state-error::before {
+        background: var(--short-text);
+      }
+
+      .live-pill.state-warn::before {
+        background: #f59e0b;
+      }
+
       button {
         align-items: center;
         background: var(--primary);
@@ -1006,6 +1014,35 @@
         element.classList.add(`state-${state}`);
       }
 
+      async function fetchJson(path, options = {}) {
+        const response = await fetch(path, {
+          ...options,
+          credentials: "same-origin",
+          headers: {
+            Accept: "application/json",
+            ...(options.headers || {}),
+          },
+        });
+        const contentType = response.headers.get("content-type") || "";
+        const payload = contentType.includes("application/json")
+          ? await response.json()
+          : await response.text();
+
+        if (!response.ok) {
+          const detail = typeof payload === "object" && payload !== null ? payload.detail : "";
+          if (response.status === 401) {
+            throw new Error("Login required (HTTP 401). Refresh or sign in again.");
+          }
+          throw new Error(detail || `HTTP ${response.status}`);
+        }
+
+        if (!contentType.includes("application/json")) {
+          throw new Error("Expected JSON but received an HTML response.");
+        }
+
+        return payload;
+      }
+
       function eventLevelClass(level) {
         if (level === "error") return "state-error";
         if (level === "warning") return "state-warn";
@@ -1166,9 +1203,7 @@
       }
 
       async function loadStatus() {
-        const response = await fetch("/status");
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        const status = await response.json();
+        const status = await fetchJson("/status");
 
         setStateValue(scannerStateEl, status.running ? "Running" : "Stopped", status.running ? "ok" : "error");
         setStateValue(
@@ -1210,7 +1245,7 @@
         currentNearSetups = status.near_setups || [];
         renderNearSetups();
 
-        currentPairs = status.pairs;
+        currentPairs = status.pairs || [];
         if (!currentPairs.length) {
           scannerPairsEl.innerHTML = '<tr><td class="empty" colspan="5">No scanner pairs configured.</td></tr>';
           return;
@@ -1220,15 +1255,9 @@
       }
 
       async function loadSignals() {
-        const response = await fetch("/signals");
-        if (!response.ok) {
-          signalResultNote.textContent = "";
-          loadMoreSignalsButton.classList.add("hidden");
-          signalsEl.innerHTML = `<tr><td class="empty" colspan="8">Signal API unavailable: HTTP ${response.status}</td></tr>`;
-          throw new Error(`HTTP ${response.status}`);
-        }
-        currentSignals = await response.json();
+        currentSignals = await fetchJson("/signals");
         statusEl.textContent = `Live - ${currentSignals.length} signal${currentSignals.length === 1 ? "" : "s"}`;
+        setStateValue(statusEl, statusEl.textContent, "ok");
 
         if (!currentSignals.length) {
           signalResultNote.textContent = "";
@@ -1241,10 +1270,30 @@
       }
 
       async function refreshAll() {
-        try {
-          await Promise.all([loadSignals(), loadStatus()]);
-        } catch (error) {
-          statusEl.textContent = "API unavailable";
+        const [signalsResult, statusResult] = await Promise.allSettled([loadSignals(), loadStatus()]);
+        const errors = [signalsResult, statusResult]
+          .filter((result) => result.status === "rejected")
+          .map((result) => result.reason?.message || "Unknown API error");
+
+        if (signalsResult.status === "rejected") {
+          signalResultNote.textContent = "";
+          loadMoreSignalsButton.classList.add("hidden");
+          signalsEl.innerHTML = `<tr><td class="empty" colspan="8">Signal API unavailable: ${escapeHtml(
+            signalsResult.reason?.message || "Unknown error"
+          )}</td></tr>`;
+        }
+
+        if (statusResult.status === "rejected") {
+          scannerPairsEl.innerHTML = `<tr><td class="empty" colspan="5">Scanner status unavailable: ${escapeHtml(
+            statusResult.reason?.message || "Unknown error"
+          )}</td></tr>`;
+        }
+
+        if (errors.length) {
+          setStateValue(statusEl, "API unavailable", "error");
+          setStateValue(lastErrorEl, errors.join(" | "), "error");
+        } else {
+          setStateValue(lastErrorEl, lastErrorEl.textContent || "None", lastErrorEl.textContent === "None" ? "ok" : "error");
         }
       }
 
@@ -1252,11 +1301,11 @@
         testTelegramButton.disabled = true;
         testTelegramButton.textContent = "Sending...";
         try {
-          const response = await fetch("/telegram/test", { method: "POST" });
-          const result = await response.json();
+          const result = await fetchJson("/telegram/test", { method: "POST" });
           testTelegramButton.textContent = result.status === "sent" ? "Sent" : "Disabled";
         } catch (error) {
           testTelegramButton.textContent = "Failed";
+          setStateValue(lastErrorEl, error.message || "Telegram test failed.", "error");
         } finally {
           window.setTimeout(() => {
             testTelegramButton.disabled = false;
