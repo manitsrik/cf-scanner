@@ -3,6 +3,8 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" id="browserThemeColor" content="#f59e0b" />
+    <link rel="icon" id="dynamicFavicon" href='data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"%3E%3Ccircle cx="32" cy="32" r="28" fill="%23f59e0b"/%3E%3Cpath d="M20 34h24M32 22v24" stroke="white" stroke-width="7" stroke-linecap="round"/%3E%3C/svg%3E' />
     <title>CF Scanner</title>
     <style>
       :root {
@@ -1440,6 +1442,8 @@
       const chart15m = document.getElementById("chart15m");
       const chart30m = document.getElementById("chart30m");
       const chart1h = document.getElementById("chart1h");
+      const dynamicFavicon = document.getElementById("dynamicFavicon");
+      const browserThemeColor = document.getElementById("browserThemeColor");
       let currentSignals = [];
       let currentNearSetups = [];
       let currentPairs = [];
@@ -1668,6 +1672,24 @@
         if (level === "warning") return "state-warn";
         if (level === "info") return "state-ok";
         return "state-muted";
+      }
+
+      function updateBrowserBiasTone(label) {
+        const tones = {
+          "Long Bias": { color: "#166534", marker: "M20 34l8 8 16-22" },
+          Neutral: { color: "#f59e0b", marker: "M20 32h24" },
+          "Short Bias": { color: "#991b1b", marker: "M20 22l24 24" },
+          Loading: { color: "#64748b", marker: "M20 32h24" },
+        };
+        const tone = tones[label] || tones.Neutral;
+        const svg = `
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+            <circle cx="32" cy="32" r="28" fill="${tone.color}"/>
+            <path d="${tone.marker}" stroke="white" stroke-width="7" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+          </svg>
+        `;
+        dynamicFavicon.href = `data:image/svg+xml,${encodeURIComponent(svg)}`;
+        browserThemeColor.content = tone.color;
       }
 
       function matchesSignalAge(signal, ageFilter) {
@@ -1915,6 +1937,7 @@
       function renderMarketOverview(overview) {
         const movers = overview?.movers || [];
         if (!overview || !movers.length) {
+          updateBrowserBiasTone("Loading");
           marketBiasNeedleEl.style.transform = "rotate(0deg)";
           marketBiasLabelEl.textContent = "Loading";
           marketBiasScoreEl.textContent = "Waiting for candles";
@@ -1938,6 +1961,7 @@
           overview.direction === "Up" ? "ok" : overview.direction === "Down" ? "error" : "warn";
         const biasState =
           overview.bias_label === "Long Bias" ? "ok" : overview.bias_label === "Short Bias" ? "error" : "warn";
+        updateBrowserBiasTone(overview.bias_label || "Neutral");
         marketBiasNeedleEl.style.transform = `rotate(${biasAngle}deg)`;
         setStateValue(marketBiasLabelEl, overview.bias_label || "Neutral", biasState);
         marketBiasScoreEl.textContent = `Score ${biasScore.toFixed(0)}/100 from 24h breadth and average gain`;
