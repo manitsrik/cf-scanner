@@ -233,6 +233,97 @@
         color: var(--muted);
       }
 
+      .market-overview {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        display: grid;
+        gap: 14px;
+        margin-bottom: 16px;
+        padding: 14px;
+      }
+
+      .overview-grid {
+        display: grid;
+        gap: 10px;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+      }
+
+      .overview-item {
+        background: var(--surface-muted);
+        border: 1px solid var(--border-soft);
+        border-radius: 7px;
+        display: grid;
+        gap: 5px;
+        min-height: 64px;
+        padding: 10px 12px;
+      }
+
+      .overview-value {
+        font-size: 18px;
+        font-weight: 850;
+        line-height: 1.15;
+      }
+
+      .breadth-track {
+        background: var(--short-bg);
+        border-radius: 999px;
+        height: 10px;
+        overflow: hidden;
+      }
+
+      .breadth-fill {
+        background: var(--long-text);
+        height: 100%;
+        transition: width 160ms ease;
+      }
+
+      .mover-list {
+        display: grid;
+        gap: 8px;
+      }
+
+      .mover-row {
+        align-items: center;
+        display: grid;
+        gap: 10px;
+        grid-template-columns: 96px minmax(120px, 1fr) 74px;
+      }
+
+      .mover-symbol {
+        font-size: 13px;
+        font-weight: 850;
+        min-width: 0;
+      }
+
+      .mover-track {
+        background: var(--surface-muted);
+        border: 1px solid var(--border-soft);
+        border-radius: 999px;
+        height: 12px;
+        overflow: hidden;
+      }
+
+      .mover-fill {
+        height: 100%;
+        min-width: 3px;
+        transition: width 160ms ease;
+      }
+
+      .mover-fill.up {
+        background: var(--long-text);
+      }
+
+      .mover-fill.down {
+        background: var(--short-text);
+      }
+
+      .mover-change {
+        font-size: 13px;
+        font-weight: 850;
+        text-align: right;
+      }
+
       [data-theme="dark"] .state-warn {
         background: #422006;
         color: #fde68a;
@@ -516,6 +607,10 @@
           grid-template-columns: repeat(3, minmax(0, 1fr));
         }
 
+        .overview-grid {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
         .metric.wide {
           grid-column: span 3;
         }
@@ -538,6 +633,14 @@
 
         .summary {
           grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        .overview-grid {
+          grid-template-columns: 1fr;
+        }
+
+        .mover-row {
+          grid-template-columns: 82px minmax(90px, 1fr) 68px;
         }
 
         .metric.wide {
@@ -650,6 +753,39 @@
         <div class="metric wide">
           <span class="metric-label">Last Error</span>
           <span class="metric-value" id="lastError">None</span>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="section-head">
+          <h2>Market Overview</h2>
+          <div class="section-note">24h gain view from the active futures watchlist</div>
+        </div>
+        <div class="market-overview" aria-label="Market overview">
+          <div class="overview-grid">
+            <div class="overview-item">
+              <span class="metric-label">Direction</span>
+              <span class="overview-value" id="marketDirection">Loading</span>
+            </div>
+            <div class="overview-item">
+              <span class="metric-label">Average Gain</span>
+              <span class="overview-value" id="marketAverage">Loading</span>
+            </div>
+            <div class="overview-item">
+              <span class="metric-label">Breadth</span>
+              <span class="overview-value" id="marketBreadth">Loading</span>
+              <div class="breadth-track" aria-hidden="true">
+                <div class="breadth-fill" id="marketBreadthFill" style="width: 0%"></div>
+              </div>
+            </div>
+            <div class="overview-item">
+              <span class="metric-label">Gainers / Losers</span>
+              <span class="overview-value" id="marketCounts">Loading</span>
+            </div>
+          </div>
+          <div class="mover-list" id="marketMovers">
+            <div class="muted">Loading market overview...</div>
+          </div>
         </div>
       </section>
 
@@ -824,6 +960,12 @@
       const cooldownStateEl = document.getElementById("cooldownState");
       const marketDataStateEl = document.getElementById("marketDataState");
       const latestCandleStateEl = document.getElementById("latestCandleState");
+      const marketDirectionEl = document.getElementById("marketDirection");
+      const marketAverageEl = document.getElementById("marketAverage");
+      const marketBreadthEl = document.getElementById("marketBreadth");
+      const marketBreadthFillEl = document.getElementById("marketBreadthFill");
+      const marketCountsEl = document.getElementById("marketCounts");
+      const marketMoversEl = document.getElementById("marketMovers");
       const watchlistStateEl = document.getElementById("watchlistState");
       const watchlistUpdatedEl = document.getElementById("watchlistUpdated");
       const systemLogEl = document.getElementById("systemLog");
@@ -1012,6 +1154,13 @@
         element.textContent = text;
         element.classList.remove("state-ok", "state-warn", "state-error", "state-muted");
         element.classList.add(`state-${state}`);
+      }
+
+      function formatPercent(value) {
+        if (value === null || value === undefined || Number.isNaN(Number(value))) return "-";
+        const number = Number(value);
+        const sign = number > 0 ? "+" : "";
+        return `${sign}${number.toFixed(2)}%`;
       }
 
       async function fetchJson(path, options = {}) {
@@ -1203,6 +1352,47 @@
           .join("");
       }
 
+      function renderMarketOverview(overview) {
+        const movers = overview?.movers || [];
+        if (!overview || !movers.length) {
+          marketDirectionEl.textContent = "Loading";
+          marketAverageEl.textContent = "Loading";
+          marketBreadthEl.textContent = "Loading";
+          marketBreadthFillEl.style.width = "0%";
+          marketCountsEl.textContent = "Loading";
+          marketMoversEl.innerHTML = '<div class="muted">Waiting for market candles...</div>';
+          return;
+        }
+
+        const average = Number(overview.average_change_pct || 0);
+        const breadth = Math.max(0, Math.min(100, Number(overview.breadth_pct || 0)));
+        const directionState =
+          overview.direction === "Up" ? "ok" : overview.direction === "Down" ? "error" : "warn";
+        setStateValue(marketDirectionEl, overview.direction, directionState);
+        setStateValue(marketAverageEl, formatPercent(average), average >= 0 ? "ok" : "error");
+        marketBreadthEl.textContent = `${breadth.toFixed(0)}% up`;
+        marketBreadthFillEl.style.width = `${breadth}%`;
+        marketCountsEl.textContent = `${overview.gainers || 0} / ${overview.losers || 0}`;
+
+        const maxMove = Math.max(...movers.map((item) => Math.abs(Number(item.change_pct || 0))), 0.01);
+        marketMoversEl.innerHTML = movers
+          .map((item) => {
+            const change = Number(item.change_pct || 0);
+            const direction = change >= 0 ? "up" : "down";
+            const width = Math.max(3, Math.abs(change) / maxMove * 100);
+            return `
+              <div class="mover-row">
+                <span class="mover-symbol">${escapeHtml(item.symbol)}</span>
+                <div class="mover-track" title="${escapeHtml(item.symbol)} ${formatPercent(change)}">
+                  <div class="mover-fill ${direction}" style="width: ${width}%"></div>
+                </div>
+                <span class="mover-change ${change >= 0 ? "state-ok" : "state-error"}">${formatPercent(change)}</span>
+              </div>
+            `;
+          })
+          .join("");
+      }
+
       async function loadStatus() {
         const status = await fetchJson("/status");
 
@@ -1243,6 +1433,7 @@
         );
         watchlistUpdatedEl.textContent = formatTime(status.watchlist_updated_at);
         renderSystemLog(status.events || []);
+        renderMarketOverview(status.market_overview);
         currentNearSetups = status.near_setups || [];
         renderNearSetups();
 
@@ -1285,6 +1476,7 @@
         }
 
         if (statusResult.status === "rejected") {
+          renderMarketOverview(null);
           scannerPairsEl.innerHTML = `<tr><td class="empty" colspan="5">Scanner status unavailable: ${escapeHtml(
             statusResult.reason?.message || "Unknown error"
           )}</td></tr>`;

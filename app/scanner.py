@@ -342,6 +342,7 @@ class FuturesScanner:
             "latest_closed_candle_at": latest_closed_candle_at.isoformat() if latest_closed_candle_at else None,
             "events": list(self._events),
             "near_setups": near_setups,
+            "market_overview": self._market_overview(),
             "pairs": pairs,
         }
 
@@ -520,13 +521,74 @@ class FuturesScanner:
             "tradingview_url": f"https://www.tradingview.com/chart/?symbol=BINANCE:{symbol}.P",
         }
 
+    def _market_overview(self) -> dict:
+        timeframe = self.settings.timeframes[0] if self.settings.timeframes else "15m"
+        timeframe_seconds = self._timeframe_seconds(timeframe)
+        lookback_periods = max(1, round((24 * 60 * 60) / timeframe_seconds))
+        movers = []
+
+        for symbol in self._active_symbols:
+            candles = self._candles.get((symbol, timeframe))
+            if candles is None or candles.empty:
+                continue
+
+            latest = candles.iloc[-1]
+            reference_index = max(0, len(candles) - lookback_periods - 1)
+            reference = candles.iloc[reference_index]
+            latest_close = float(latest["close"])
+            reference_close = float(reference["close"])
+            if reference_close <= 0:
+                continue
+
+            change_pct = (latest_close - reference_close) / reference_close * 100
+            movers.append(
+                {
+                    "symbol": symbol,
+                    "timeframe": timeframe,
+                    "price": latest_close,
+                    "change_pct": change_pct,
+                    "direction": "up" if change_pct > 0 else "down" if change_pct < 0 else "flat",
+                    "latest_closed_candle_at": latest["close_time"].to_pydatetime().isoformat(),
+                    "reference_closed_candle_at": reference["close_time"].to_pydatetime().isoformat(),
+                }
+            )
+
+        gainers = sum(1 for item in movers if item["change_pct"] > 0)
+        losers = sum(1 for item in movers if item["change_pct"] < 0)
+        average_change_pct = sum(item["change_pct"] for item in movers) / len(movers) if movers else 0
+        breadth_pct = gainers / len(movers) * 100 if movers else 0
+        if not movers:
+            direction = "Loading"
+        elif average_change_pct > 0 and gainers >= losers:
+            direction = "Up"
+        elif average_change_pct < 0 and losers > gainers:
+            direction = "Down"
+        else:
+            direction = "Mixed"
+
+        return {
+            "timeframe": timeframe,
+            "lookback_hours": 24,
+            "direction": direction,
+            "average_change_pct": average_change_pct,
+            "breadth_pct": breadth_pct,
+            "gainers": gainers,
+            "losers": losers,
+            "flat": len(movers) - gainers - losers,
+            "movers": sorted(movers, key=lambda item: item["change_pct"], reverse=True),
+        }
+
+    @staticmethod
+    def _timeframe_seconds(timeframe: str) -> int:
+        if timeframe.endswith("m"):
+            return int(timeframe.removesuffix("m")) * 60
+        if timeframe.endswith("h"):
+            return int(timeframe.removesuffix("h")) * 60 * 60
+        return 15 * 60
+
     @staticmethod
     def _stale_after_seconds(timeframe: str) -> int:
-        if timeframe.endswith("m"):
-            return int(timeframe.removesuffix("m")) * 60 * 3
-        if timeframe.endswith("h"):
-            return int(timeframe.removesuffix("h")) * 60 * 60 * 3
-        return 60 * 60 * 3
+        return FuturesScanner._timeframe_seconds(timeframe) * 3
 
     def _record_event(self, level: str, message: str) -> None:
         self._events.appendleft(
