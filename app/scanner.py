@@ -675,26 +675,26 @@ class FuturesScanner:
         flags = []
         level = "Low"
         if bias_label == "Neutral":
-            flags.append("Bias is neutral: reduce size and wait for confirmation.")
+            flags.append("Bias ยังเป็นกลาง: ลดขนาดไม้และรอ confirmation ก่อนเข้าเทรด")
             level = "Moderate"
         if 45 <= breadth_pct <= 55:
-            flags.append("Breadth is balanced: avoid forcing directional trades.")
+            flags.append("Breadth ก้ำกึ่ง: เหรียญขึ้นลงใกล้เคียงกัน อย่าฝืนเลือกทาง")
             level = "Moderate"
         if movers:
             max_abs_move = max(abs(float(item.get("change_pct", 0))) for item in movers)
             if max_abs_move >= 8:
-                flags.append("One or more movers are extended: avoid chasing late entries.")
+                flags.append("มีเหรียญที่วิ่งไกลแล้ว: ระวังการไล่ราคาและรอจังหวะย่อ")
                 level = "High"
         btc = next((item for item in movers if item.get("symbol") == "BTCUSDT"), None)
         eth = next((item for item in movers if item.get("symbol") == "ETHUSDT"), None)
         if btc and eth and float(btc["change_pct"]) * float(eth["change_pct"]) < 0:
-            flags.append("BTC and ETH disagree: expect choppy alt moves.")
+            flags.append("BTC กับ ETH สวนทางกัน: altcoins อาจแกว่งและหลอกทิศทางง่าย")
             level = "High" if level == "Moderate" else "Moderate"
         if direction == "Up" and average_change_pct < 0.15:
-            flags.append("Market is up, but average gain is thin.")
+            flags.append("ตลาดเอียงขึ้น แต่ average gain ยังบาง: แรงซื้อยังไม่กว้าง")
             level = "Moderate"
         if not flags:
-            flags.append("Risk is normal for the current watchlist.")
+            flags.append("ความเสี่ยงปกติสำหรับ watchlist ปัจจุบัน")
         return {"level": level, "flags": flags}
 
     @staticmethod

@@ -964,10 +964,10 @@
             <div class="decision-panel">
               <div>
                 <span class="metric-label">Risk Panel</span>
-                <span class="overview-value" id="riskLevel">Loading</span>
+                <span class="overview-value" id="riskLevel">กำลังโหลด</span>
               </div>
               <div class="risk-list" id="riskFlags">
-                <div class="muted">Waiting for risk checks...</div>
+                <div class="muted">กำลังรอตรวจความเสี่ยง...</div>
               </div>
             </div>
           </div>
@@ -1354,6 +1354,13 @@
         return `${sign}${number.toFixed(2)}%`;
       }
 
+      function riskLevelText(level) {
+        if (level === "High") return "สูง";
+        if (level === "Moderate") return "ปานกลาง";
+        if (level === "Low") return "ต่ำ";
+        return "กำลังโหลด";
+      }
+
       async function fetchJson(path, options = {}) {
         const response = await fetch(path, {
           ...options,
@@ -1555,8 +1562,8 @@
           marketBreadthFillEl.style.width = "0%";
           marketCountsEl.textContent = "Loading";
           marketMoversEl.innerHTML = '<div class="muted">Waiting for market candles...</div>';
-          riskLevelEl.textContent = "Loading";
-          riskFlagsEl.innerHTML = '<div class="muted">Waiting for risk checks...</div>';
+          riskLevelEl.textContent = "กำลังโหลด";
+          riskFlagsEl.innerHTML = '<div class="muted">กำลังรอตรวจความเสี่ยง...</div>';
           return;
         }
 
@@ -1597,8 +1604,8 @@
 
         const risk = overview.risk || {};
         const riskState = risk.level === "High" ? "error" : risk.level === "Moderate" ? "warn" : "ok";
-        setStateValue(riskLevelEl, risk.level || "Loading", riskState);
-        riskFlagsEl.innerHTML = (risk.flags || ["Waiting for risk checks..."])
+        setStateValue(riskLevelEl, riskLevelText(risk.level), riskState);
+        riskFlagsEl.innerHTML = (risk.flags || ["กำลังรอตรวจความเสี่ยง..."])
           .map((flag) => `<div class="risk-item">${escapeHtml(flag)}</div>`)
           .join("");
       }
