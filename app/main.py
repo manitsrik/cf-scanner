@@ -49,16 +49,24 @@ app.add_middleware(
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 
+def no_store_file_response(path: str) -> FileResponse:
+    response = FileResponse(path)
+    response.headers["Cache-Control"] = "no-store, max-age=0"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
+    return response
+
+
 @app.get("/", include_in_schema=False)
 async def dashboard(_: None = Depends(require_page_auth)) -> FileResponse:
-    return FileResponse("static/index.html")
+    return no_store_file_response("static/index.html")
 
 
 @app.get("/login", include_in_schema=False)
 async def login_page(request: Request):
     if verify_password("") and not settings.dashboard_password:
         return redirect_to_dashboard()
-    return FileResponse("static/login.html")
+    return no_store_file_response("static/login.html")
 
 
 @app.post("/login", include_in_schema=False)

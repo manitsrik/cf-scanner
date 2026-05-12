@@ -1,4 +1,5 @@
 from functools import lru_cache
+from hashlib import sha256
 import secrets
 
 from pydantic import Field
@@ -29,9 +30,18 @@ class Settings(BaseSettings):
     near_cross_threshold_pct: float = 0.15
     near_volume_ratio_min: float = 0.8
     dashboard_password: str | None = None
-    session_secret: str = Field(default_factory=lambda: secrets.token_urlsafe(32))
+    session_secret: str | None = None
     session_cookie_name: str = "cf_scanner_session"
     session_cookie_secure: bool = True
+
+    def model_post_init(self, __context: object) -> None:
+        if self.session_secret:
+            return
+        if self.dashboard_password:
+            seed = f"cf-scanner-session:{self.dashboard_password}"
+            self.session_secret = sha256(seed.encode()).hexdigest()
+            return
+        self.session_secret = secrets.token_urlsafe(32)
 
 
 @lru_cache

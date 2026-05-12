@@ -1031,6 +1031,7 @@
         if (!response.ok) {
           const detail = typeof payload === "object" && payload !== null ? payload.detail : "";
           if (response.status === 401) {
+            window.location.assign("/login");
             throw new Error("Login required (HTTP 401). Refresh or sign in again.");
           }
           throw new Error(detail || `HTTP ${response.status}`);
