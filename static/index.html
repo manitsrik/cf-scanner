@@ -425,6 +425,16 @@
         grid-template-columns: 1fr;
       }
 
+      .action-section {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        display: grid;
+        gap: 8px;
+        margin-bottom: 14px;
+        padding: 10px;
+      }
+
       .decision-panel {
         background: var(--surface-muted);
         border: 1px solid var(--border-soft);
@@ -441,7 +451,7 @@
       }
 
       .setup-list {
-        max-height: 176px;
+        max-height: 214px;
         overflow: auto;
         padding-right: 2px;
       }
@@ -456,7 +466,7 @@
         align-items: center;
         display: grid;
         gap: 8px;
-        grid-template-columns: 82px 60px 68px minmax(80px, 1fr) 42px;
+        grid-template-columns: 94px 62px 70px minmax(140px, 1fr) 42px;
       }
 
       .setup-score {
@@ -844,7 +854,7 @@
         }
 
         .setup-row {
-          grid-template-columns: 76px 62px 66px 1fr;
+          grid-template-columns: 82px 62px 66px 1fr;
         }
 
         .setup-row .link-button {
@@ -966,6 +976,16 @@
               <span class="metric-value" id="lastError">None</span>
             </div>
           </section>
+
+          <section class="action-section" aria-label="Best setups now">
+            <div class="section-head">
+              <h2>Best Setups Now</h2>
+              <div class="section-note">Ranked watchlist coins to inspect first</div>
+            </div>
+            <div class="setup-list" id="bestSetups">
+              <div class="muted">Waiting for setup ranking...</div>
+            </div>
+          </section>
         </div>
 
         <section class="section dashboard-side">
@@ -1021,14 +1041,6 @@
             <div class="muted">Loading market overview...</div>
           </div>
           <div class="decision-grid">
-            <div class="decision-panel">
-              <div>
-                <span class="metric-label">Best Setups Now</span>
-              </div>
-              <div class="setup-list" id="bestSetups">
-                <div class="muted">Waiting for setup ranking...</div>
-              </div>
-            </div>
             <div class="decision-panel">
               <div>
                 <span class="metric-label">Risk Panel</span>
