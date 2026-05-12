@@ -557,19 +557,26 @@ class FuturesScanner:
         losers = sum(1 for item in movers if item["change_pct"] < 0)
         average_change_pct = sum(item["change_pct"] for item in movers) / len(movers) if movers else 0
         breadth_pct = gainers / len(movers) * 100 if movers else 0
+        bias_score = max(0, min(100, (breadth_pct * 0.7) + ((average_change_pct + 5) / 10 * 100 * 0.3)))
         if not movers:
             direction = "Loading"
+            bias_label = "Loading"
         elif average_change_pct > 0 and gainers >= losers:
             direction = "Up"
+            bias_label = "Long Bias" if bias_score >= 60 else "Neutral"
         elif average_change_pct < 0 and losers > gainers:
             direction = "Down"
+            bias_label = "Short Bias" if bias_score <= 40 else "Neutral"
         else:
             direction = "Mixed"
+            bias_label = "Neutral"
 
         return {
             "timeframe": timeframe,
             "lookback_hours": 24,
             "direction": direction,
+            "bias_label": bias_label,
+            "bias_score": bias_score,
             "average_change_pct": average_change_pct,
             "breadth_pct": breadth_pct,
             "gainers": gainers,

@@ -243,6 +243,86 @@
         padding: 14px;
       }
 
+      .bias-gauge {
+        align-items: center;
+        display: grid;
+        gap: 12px;
+        grid-template-columns: minmax(230px, 360px) minmax(0, 1fr);
+      }
+
+      .gauge-visual {
+        aspect-ratio: 2 / 1;
+        background:
+          conic-gradient(from 270deg at 50% 100%, var(--short-text) 0deg 54deg, #f59e0b 54deg 126deg, var(--long-text) 126deg 180deg, transparent 180deg 360deg);
+        border-radius: 999px 999px 0 0;
+        overflow: hidden;
+        position: relative;
+      }
+
+      .gauge-visual::after {
+        background: var(--surface);
+        border-radius: 999px 999px 0 0;
+        bottom: 0;
+        content: "";
+        height: 68%;
+        left: 16%;
+        position: absolute;
+        right: 16%;
+      }
+
+      .gauge-needle {
+        background: var(--text);
+        border-radius: 999px;
+        bottom: 0;
+        height: 4px;
+        left: 50%;
+        position: absolute;
+        transform: translateX(-50%) rotate(0deg);
+        transform-origin: left center;
+        transition: transform 180ms ease;
+        width: 42%;
+        z-index: 2;
+      }
+
+      .gauge-center {
+        background: var(--text);
+        border: 3px solid var(--surface);
+        border-radius: 999px;
+        bottom: -9px;
+        height: 22px;
+        left: calc(50% - 11px);
+        position: absolute;
+        width: 22px;
+        z-index: 3;
+      }
+
+      .gauge-labels {
+        color: var(--muted);
+        display: flex;
+        font-size: 12px;
+        font-weight: 850;
+        justify-content: space-between;
+        margin-top: 6px;
+        text-transform: uppercase;
+      }
+
+      .bias-summary {
+        display: grid;
+        gap: 8px;
+      }
+
+      .bias-label {
+        font-size: 26px;
+        font-weight: 850;
+        line-height: 1.1;
+      }
+
+      .bias-score {
+        color: var(--muted);
+        font-size: 13px;
+        font-weight: 750;
+      }
+
       .overview-grid {
         display: grid;
         gap: 10px;
@@ -611,6 +691,10 @@
           grid-template-columns: repeat(2, minmax(0, 1fr));
         }
 
+        .bias-gauge {
+          grid-template-columns: 1fr;
+        }
+
         .metric.wide {
           grid-column: span 3;
         }
@@ -637,6 +721,10 @@
 
         .overview-grid {
           grid-template-columns: 1fr;
+        }
+
+        .bias-label {
+          font-size: 22px;
         }
 
         .mover-row {
@@ -762,6 +850,24 @@
           <div class="section-note">24h gain view from the active futures watchlist</div>
         </div>
         <div class="market-overview" aria-label="Market overview">
+          <div class="bias-gauge">
+            <div>
+              <div class="gauge-visual" aria-hidden="true">
+                <div class="gauge-needle" id="marketBiasNeedle"></div>
+                <div class="gauge-center"></div>
+              </div>
+              <div class="gauge-labels">
+                <span>Short</span>
+                <span>Neutral</span>
+                <span>Long</span>
+              </div>
+            </div>
+            <div class="bias-summary">
+              <span class="metric-label">Market Bias</span>
+              <span class="bias-label" id="marketBiasLabel">Loading</span>
+              <span class="bias-score" id="marketBiasScore">Waiting for candles</span>
+            </div>
+          </div>
           <div class="overview-grid">
             <div class="overview-item">
               <span class="metric-label">Direction</span>
@@ -961,6 +1067,9 @@
       const marketDataStateEl = document.getElementById("marketDataState");
       const latestCandleStateEl = document.getElementById("latestCandleState");
       const marketDirectionEl = document.getElementById("marketDirection");
+      const marketBiasNeedleEl = document.getElementById("marketBiasNeedle");
+      const marketBiasLabelEl = document.getElementById("marketBiasLabel");
+      const marketBiasScoreEl = document.getElementById("marketBiasScore");
       const marketAverageEl = document.getElementById("marketAverage");
       const marketBreadthEl = document.getElementById("marketBreadth");
       const marketBreadthFillEl = document.getElementById("marketBreadthFill");
@@ -1355,6 +1464,9 @@
       function renderMarketOverview(overview) {
         const movers = overview?.movers || [];
         if (!overview || !movers.length) {
+          marketBiasNeedleEl.style.transform = "translateX(-50%) rotate(0deg)";
+          marketBiasLabelEl.textContent = "Loading";
+          marketBiasScoreEl.textContent = "Waiting for candles";
           marketDirectionEl.textContent = "Loading";
           marketAverageEl.textContent = "Loading";
           marketBreadthEl.textContent = "Loading";
@@ -1366,8 +1478,15 @@
 
         const average = Number(overview.average_change_pct || 0);
         const breadth = Math.max(0, Math.min(100, Number(overview.breadth_pct || 0)));
+        const biasScore = Math.max(0, Math.min(100, Number(overview.bias_score ?? 50)));
+        const biasAngle = biasScore / 100 * 180 - 180;
         const directionState =
           overview.direction === "Up" ? "ok" : overview.direction === "Down" ? "error" : "warn";
+        const biasState =
+          overview.bias_label === "Long Bias" ? "ok" : overview.bias_label === "Short Bias" ? "error" : "warn";
+        marketBiasNeedleEl.style.transform = `translateX(-50%) rotate(${biasAngle}deg)`;
+        setStateValue(marketBiasLabelEl, overview.bias_label || "Neutral", biasState);
+        marketBiasScoreEl.textContent = `Score ${biasScore.toFixed(0)}/100 from 24h breadth and average gain`;
         setStateValue(marketDirectionEl, overview.direction, directionState);
         setStateValue(marketAverageEl, formatPercent(average), average >= 0 ? "ok" : "error");
         marketBreadthEl.textContent = `${breadth.toFixed(0)}% up`;
