@@ -60,7 +60,7 @@
       header {
         background: var(--surface);
         border-bottom: 1px solid var(--border);
-        padding: 18px clamp(16px, 4vw, 40px);
+        padding: 12px clamp(14px, 3vw, 28px);
       }
 
       .topbar {
@@ -69,7 +69,7 @@
         gap: 18px;
         justify-content: space-between;
         margin: 0 auto;
-        max-width: 1440px;
+        max-width: 1600px;
       }
 
       .brand {
@@ -77,7 +77,7 @@
       }
 
       h1 {
-        font-size: 22px;
+        font-size: 18px;
         font-weight: 750;
         letter-spacing: 0;
         line-height: 1.2;
@@ -86,7 +86,7 @@
 
       .subtitle {
         color: var(--muted);
-        font-size: 13px;
+        font-size: 12px;
       }
 
       .actions {
@@ -155,15 +155,27 @@
 
       main {
         margin: 0 auto;
-        max-width: 1440px;
-        padding: 24px clamp(16px, 4vw, 40px) 40px;
+        max-width: 1600px;
+        padding: 14px clamp(14px, 3vw, 28px) 28px;
+      }
+
+      .dashboard-grid {
+        align-items: start;
+        display: grid;
+        gap: 14px;
+        grid-template-columns: minmax(660px, 1.45fr) minmax(390px, 0.9fr);
+      }
+
+      .dashboard-main,
+      .dashboard-side {
+        min-width: 0;
       }
 
       .summary {
         display: grid;
-        gap: 8px;
-        grid-template-columns: repeat(6, minmax(0, 1fr));
-        margin-bottom: 16px;
+        gap: 6px;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        margin-bottom: 14px;
       }
 
       .metric {
@@ -172,13 +184,13 @@
         border: 1px solid var(--border);
         border-radius: 7px;
         display: grid;
-        gap: 5px;
-        min-height: 62px;
-        padding: 10px 12px;
+        gap: 4px;
+        min-height: 50px;
+        padding: 8px 10px;
       }
 
       .metric.compact {
-        min-height: 56px;
+        min-height: 48px;
       }
 
       .metric.wide {
@@ -188,7 +200,7 @@
       .metric-label {
         color: var(--muted);
         display: block;
-        font-size: 10px;
+        font-size: 9px;
         font-weight: 800;
         letter-spacing: 0.05em;
         text-transform: uppercase;
@@ -197,7 +209,7 @@
       .metric-value {
         color: var(--text);
         display: block;
-        font-size: 14px;
+        font-size: 13px;
         font-weight: 800;
         line-height: 1.25;
         overflow-wrap: anywhere;
@@ -238,16 +250,16 @@
         border: 1px solid var(--border);
         border-radius: 8px;
         display: grid;
-        gap: 14px;
-        margin-bottom: 16px;
-        padding: 14px;
+        gap: 10px;
+        margin-bottom: 14px;
+        padding: 12px;
       }
 
       .bias-gauge {
         align-items: center;
         display: grid;
-        gap: 12px;
-        grid-template-columns: minmax(230px, 360px) minmax(0, 1fr);
+        gap: 10px;
+        grid-template-columns: minmax(180px, 230px) minmax(0, 1fr);
       }
 
       .gauge-visual {
@@ -312,7 +324,7 @@
       }
 
       .bias-label {
-        font-size: 26px;
+        font-size: 22px;
         font-weight: 850;
         line-height: 1.1;
       }
@@ -325,8 +337,8 @@
 
       .overview-grid {
         display: grid;
-        gap: 10px;
-        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 8px;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
       }
 
       .overview-item {
@@ -335,12 +347,12 @@
         border-radius: 7px;
         display: grid;
         gap: 5px;
-        min-height: 64px;
-        padding: 10px 12px;
+        min-height: 58px;
+        padding: 8px 10px;
       }
 
       .overview-value {
-        font-size: 18px;
+        font-size: 16px;
         font-weight: 850;
         line-height: 1.15;
       }
@@ -360,14 +372,17 @@
 
       .mover-list {
         display: grid;
-        gap: 8px;
+        gap: 6px;
+        max-height: 190px;
+        overflow: auto;
+        padding-right: 2px;
       }
 
       .mover-row {
         align-items: center;
         display: grid;
-        gap: 10px;
-        grid-template-columns: 96px minmax(120px, 1fr) 74px;
+        gap: 8px;
+        grid-template-columns: 84px minmax(90px, 1fr) 66px;
       }
 
       .mover-symbol {
@@ -406,8 +421,8 @@
 
       .decision-grid {
         display: grid;
-        gap: 10px;
-        grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr);
+        gap: 8px;
+        grid-template-columns: 1fr;
       }
 
       .decision-panel {
@@ -415,21 +430,33 @@
         border: 1px solid var(--border-soft);
         border-radius: 7px;
         display: grid;
-        gap: 10px;
-        padding: 12px;
+        gap: 8px;
+        padding: 10px;
       }
 
       .setup-list,
       .risk-list {
         display: grid;
-        gap: 8px;
+        gap: 6px;
+      }
+
+      .setup-list {
+        max-height: 176px;
+        overflow: auto;
+        padding-right: 2px;
+      }
+
+      .risk-list {
+        max-height: 96px;
+        overflow: auto;
+        padding-right: 2px;
       }
 
       .setup-row {
         align-items: center;
         display: grid;
-        gap: 10px;
-        grid-template-columns: 94px 68px 76px minmax(120px, 1fr) 54px;
+        gap: 8px;
+        grid-template-columns: 82px 60px 68px minmax(80px, 1fr) 42px;
       }
 
       .setup-score {
@@ -457,7 +484,7 @@
       }
 
       .section {
-        margin-bottom: 16px;
+        margin-bottom: 14px;
       }
 
       .section-head {
@@ -465,7 +492,7 @@
         display: flex;
         gap: 12px;
         justify-content: space-between;
-        margin-bottom: 10px;
+        margin-bottom: 8px;
       }
 
       .filters {
@@ -521,7 +548,8 @@
         background: var(--surface);
         border: 1px solid var(--border);
         border-radius: 8px;
-        overflow-x: auto;
+        max-height: 360px;
+        overflow: auto;
       }
 
       table {
@@ -686,7 +714,7 @@
 
       .chart-frame {
         background: var(--surface-muted);
-        height: 460px;
+        height: clamp(320px, 42vh, 430px);
         width: 100%;
       }
 
@@ -719,6 +747,24 @@
         padding: 0;
       }
 
+      @media (max-width: 1180px) {
+        .dashboard-grid {
+          grid-template-columns: 1fr;
+        }
+
+        .summary {
+          grid-template-columns: repeat(3, minmax(0, 1fr));
+        }
+
+        .bias-gauge {
+          grid-template-columns: minmax(230px, 360px) minmax(0, 1fr);
+        }
+
+        .decision-grid {
+          grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr);
+        }
+      }
+
       @media (max-width: 980px) {
         .topbar {
           align-items: flex-start;
@@ -728,10 +774,6 @@
         .actions {
           justify-content: flex-start;
           width: 100%;
-        }
-
-        .summary {
-          grid-template-columns: repeat(3, minmax(0, 1fr));
         }
 
         .overview-grid {
@@ -808,7 +850,7 @@
         }
 
         .chart-frame {
-          height: 390px;
+          height: 340px;
         }
 
       }
@@ -834,77 +876,80 @@
     </header>
 
     <main>
-      <section class="section">
-        <div class="section-head">
-          <h2>Chart</h2>
-          <div class="section-note">Click Chart on any row to load its TradingView futures chart</div>
-        </div>
-        <div class="chart-panel">
-          <div class="chart-toolbar">
-            <div class="chart-title" id="chartTitle">BTCUSDT 15m</div>
-            <div class="chart-actions">
-              <button class="secondary" id="chart15m" type="button">15m</button>
-              <button class="secondary" id="chart30m" type="button">30m</button>
-              <button class="secondary" id="chart1h" type="button">1h</button>
-              <a id="chartOpenLink" href="https://www.tradingview.com/chart/?symbol=BINANCE:BTCUSDT.P" target="_blank" rel="noreferrer">Open full chart</a>
+      <div class="dashboard-grid">
+        <div class="dashboard-main">
+          <section class="section">
+            <div class="section-head">
+              <h2>Chart</h2>
+              <div class="section-note">Click Chart on any row to load its TradingView futures chart</div>
             </div>
-          </div>
-          <div class="chart-frame" id="chartFrame"></div>
-        </div>
-      </section>
+            <div class="chart-panel">
+              <div class="chart-toolbar">
+                <div class="chart-title" id="chartTitle">BTCUSDT 15m</div>
+                <div class="chart-actions">
+                  <button class="secondary" id="chart15m" type="button">15m</button>
+                  <button class="secondary" id="chart30m" type="button">30m</button>
+                  <button class="secondary" id="chart1h" type="button">1h</button>
+                  <a id="chartOpenLink" href="https://www.tradingview.com/chart/?symbol=BINANCE:BTCUSDT.P" target="_blank" rel="noreferrer">Open full chart</a>
+                </div>
+              </div>
+              <div class="chart-frame" id="chartFrame"></div>
+            </div>
+          </section>
 
-      <section class="summary" aria-label="Scanner status">
-        <div class="metric compact">
-          <span class="metric-label">Scanner</span>
-          <span class="metric-value" id="scannerState">Loading</span>
+          <section class="summary" aria-label="Scanner status">
+            <div class="metric compact">
+              <span class="metric-label">Scanner</span>
+              <span class="metric-value" id="scannerState">Loading</span>
+            </div>
+            <div class="metric compact">
+              <span class="metric-label">Websocket</span>
+              <span class="metric-value" id="websocketState">Loading</span>
+            </div>
+            <div class="metric compact">
+              <span class="metric-label">Telegram</span>
+              <span class="metric-value" id="telegramState">Loading</span>
+            </div>
+            <div class="metric compact">
+              <span class="metric-label">Watchlist</span>
+              <span class="metric-value" id="watchlistState">Loading</span>
+            </div>
+            <div class="metric compact">
+              <span class="metric-label">Near Setups</span>
+              <span class="metric-value" id="nearSetupState">Loading</span>
+            </div>
+            <div class="metric compact">
+              <span class="metric-label">Cooldown</span>
+              <span class="metric-value" id="cooldownState">Loading</span>
+            </div>
+            <div class="metric">
+              <span class="metric-label">Market Data</span>
+              <span class="metric-value" id="marketDataState">Loading</span>
+            </div>
+            <div class="metric">
+              <span class="metric-label">Latest Candle</span>
+              <span class="metric-value" id="latestCandleState">Waiting</span>
+            </div>
+            <div class="metric">
+              <span class="metric-label">REST Refresh</span>
+              <span class="metric-value" id="lastRestRefresh">Waiting</span>
+            </div>
+            <div class="metric">
+              <span class="metric-label">Watchlist Updated</span>
+              <span class="metric-value" id="watchlistUpdated">Waiting</span>
+            </div>
+            <div class="metric">
+              <span class="metric-label">Last Message</span>
+              <span class="metric-value" id="lastMessage">Waiting</span>
+            </div>
+            <div class="metric wide">
+              <span class="metric-label">Last Error</span>
+              <span class="metric-value" id="lastError">None</span>
+            </div>
+          </section>
         </div>
-        <div class="metric compact">
-          <span class="metric-label">Websocket</span>
-          <span class="metric-value" id="websocketState">Loading</span>
-        </div>
-        <div class="metric compact">
-          <span class="metric-label">Telegram</span>
-          <span class="metric-value" id="telegramState">Loading</span>
-        </div>
-        <div class="metric compact">
-          <span class="metric-label">Watchlist</span>
-          <span class="metric-value" id="watchlistState">Loading</span>
-        </div>
-        <div class="metric compact">
-          <span class="metric-label">Near Setups</span>
-          <span class="metric-value" id="nearSetupState">Loading</span>
-        </div>
-        <div class="metric compact">
-          <span class="metric-label">Cooldown</span>
-          <span class="metric-value" id="cooldownState">Loading</span>
-        </div>
-        <div class="metric">
-          <span class="metric-label">Market Data</span>
-          <span class="metric-value" id="marketDataState">Loading</span>
-        </div>
-        <div class="metric">
-          <span class="metric-label">Latest Candle</span>
-          <span class="metric-value" id="latestCandleState">Waiting</span>
-        </div>
-        <div class="metric">
-          <span class="metric-label">REST Refresh</span>
-          <span class="metric-value" id="lastRestRefresh">Waiting</span>
-        </div>
-        <div class="metric">
-          <span class="metric-label">Watchlist Updated</span>
-          <span class="metric-value" id="watchlistUpdated">Waiting</span>
-        </div>
-        <div class="metric">
-          <span class="metric-label">Last Message</span>
-          <span class="metric-value" id="lastMessage">Waiting</span>
-        </div>
-        <div class="metric wide">
-          <span class="metric-label">Last Error</span>
-          <span class="metric-value" id="lastError">None</span>
-        </div>
-      </section>
 
-      <section class="section">
+        <section class="section dashboard-side">
         <div class="section-head">
           <h2>Market Overview</h2>
           <div class="section-note">24h gain view from the active futures watchlist</div>
@@ -973,6 +1018,7 @@
           </div>
         </div>
       </section>
+      </div>
 
       <section class="section">
         <div class="section-head">
