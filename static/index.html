@@ -549,8 +549,7 @@
       }
 
       .setup-list,
-      .risk-list,
-      .near-watch-list {
+      .risk-list {
         display: grid;
         gap: 6px;
       }
@@ -563,12 +562,6 @@
 
       .risk-list {
         max-height: 96px;
-        overflow: auto;
-        padding-right: 2px;
-      }
-
-      .near-watch-list {
-        max-height: 150px;
         overflow: auto;
         padding-right: 2px;
       }
@@ -591,19 +584,6 @@
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
-      }
-
-      .near-watch-row {
-        align-items: center;
-        display: grid;
-        gap: 8px;
-        grid-template-columns: 86px 58px 44px 54px 42px;
-      }
-
-      .near-watch-value {
-        color: var(--text);
-        font-size: 12px;
-        font-weight: 850;
       }
 
       .risk-item {
@@ -981,15 +961,6 @@
           grid-template-columns: 82px 62px 66px 1fr;
         }
 
-        .near-watch-row {
-          grid-template-columns: 82px 62px 42px 52px;
-        }
-
-        .near-watch-row .link-button {
-          grid-column: 1 / -1;
-          justify-content: flex-start;
-        }
-
         .setup-row .link-button {
           grid-column: 1 / -1;
           justify-content: flex-start;
@@ -1195,14 +1166,6 @@
                 <div class="muted">กำลังรอตรวจความเสี่ยง...</div>
               </div>
             </div>
-            <div class="decision-panel">
-              <div>
-                <span class="metric-label">Near Setups Watch</span>
-              </div>
-              <div class="near-watch-list" id="nearSetupsWatch">
-                <div class="muted">No near setups now.</div>
-              </div>
-            </div>
           </div>
         </div>
       </section>
@@ -1395,7 +1358,6 @@
       const bestSetupsEl = document.getElementById("bestSetups");
       const riskLevelEl = document.getElementById("riskLevel");
       const riskFlagsEl = document.getElementById("riskFlags");
-      const nearSetupsWatchEl = document.getElementById("nearSetupsWatch");
       const watchlistStateEl = document.getElementById("watchlistState");
       const watchlistUpdatedEl = document.getElementById("watchlistUpdated");
       const systemLogEl = document.getElementById("systemLog");
@@ -1782,28 +1744,6 @@
           .join("");
       }
 
-      function renderNearSetupsWatch(setups) {
-        const visible = (setups || []).slice(0, 5);
-        if (!visible.length) {
-          nearSetupsWatchEl.innerHTML = '<div class="muted">No near setups now.</div>';
-          return;
-        }
-
-        nearSetupsWatchEl.innerHTML = visible
-          .map(
-            (setup) => `
-              <div class="near-watch-row">
-                <span class="mover-symbol">${escapeHtml(setup.symbol)}</span>
-                <span class="badge ${setup.setup_type}">${escapeHtml(setup.setup_type)}</span>
-                <span class="near-watch-value">${escapeHtml(setup.timeframe)}</span>
-                <span class="near-watch-value">${Number(setup.rsi).toFixed(0)} RSI</span>
-                ${chartButton(setup.symbol, setup.timeframe)}
-              </div>
-            `
-          )
-          .join("");
-      }
-
       function newsSentimentText(sentiment) {
         if (sentiment === "Bullish") return "บวก";
         if (sentiment === "Bearish") return "ลบ";
@@ -2043,7 +1983,6 @@
         renderBestSetups(status.best_setups || []);
         renderThaiMarketBrief(status.market_overview, status.best_setups || []);
         currentNearSetups = status.near_setups || [];
-        renderNearSetupsWatch(currentNearSetups);
         renderNearSetups();
 
         currentPairs = status.pairs || [];
@@ -2160,7 +2099,6 @@
           renderMarketOverview(null);
           renderBestSetups([]);
           renderThaiMarketBrief(null, []);
-          renderNearSetupsWatch([]);
           scannerPairsEl.innerHTML = `<tr><td class="empty" colspan="5">Scanner status unavailable: ${escapeHtml(
             statusResult.reason?.message || "Unknown error"
           )}</td></tr>`;
