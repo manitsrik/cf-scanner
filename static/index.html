@@ -387,6 +387,10 @@
         padding: 10px;
       }
 
+      .news-impact.expanded .news-list {
+        max-height: 520px;
+      }
+
       .news-impact-head {
         align-items: start;
         display: flex;
@@ -399,6 +403,19 @@
         font-size: 12px;
         line-height: 1.35;
         text-align: right;
+      }
+
+      .news-head-actions {
+        align-items: flex-end;
+        display: grid;
+        gap: 6px;
+        justify-items: end;
+      }
+
+      .news-toggle {
+        font-size: 12px;
+        min-height: 28px;
+        padding: 0 10px;
       }
 
       .news-list {
@@ -1175,13 +1192,14 @@
             <span class="metric-label">Thai Market Brief</span>
             <div class="brief-line">กำลังสรุปภาพรวมตลาด...</div>
           </div>
-          <div class="news-impact" aria-label="News impact">
+          <div class="news-impact" id="newsImpactCard" aria-label="News impact">
             <div class="news-impact-head">
               <div>
                 <span class="metric-label">News Impact</span>
                 <div class="overview-value" id="newsImpactState">Loading</div>
               </div>
               <div class="news-summary" id="newsImpactSummary">กำลังดึงข่าวล่าสุด...</div>
+              <button class="secondary news-toggle" id="newsExpandButton" type="button">Expand</button>
             </div>
             <div class="news-list" id="newsImpactList">
               <div class="muted">Waiting for news...</div>
@@ -1388,9 +1406,11 @@
       const marketCountsEl = document.getElementById("marketCounts");
       const marketMoversEl = document.getElementById("marketMovers");
       const thaiMarketBriefEl = document.getElementById("thaiMarketBrief");
+      const newsImpactCardEl = document.getElementById("newsImpactCard");
       const newsImpactStateEl = document.getElementById("newsImpactState");
       const newsImpactSummaryEl = document.getElementById("newsImpactSummary");
       const newsImpactListEl = document.getElementById("newsImpactList");
+      const newsExpandButton = document.getElementById("newsExpandButton");
       const bestSetupsEl = document.getElementById("bestSetups");
       const riskLevelEl = document.getElementById("riskLevel");
       const riskFlagsEl = document.getElementById("riskFlags");
@@ -1423,6 +1443,8 @@
       let currentSignals = [];
       let currentNearSetups = [];
       let currentPairs = [];
+      let currentNews = null;
+      let newsImpactExpanded = false;
       let currentChartSymbol = "BTCUSDT";
       let currentChartTimeframe = "15m";
       let signalVisibleLimit = Number(signalLimitSelect.value);
@@ -2157,6 +2179,67 @@
           .join("");
       }
 
+      function renderNewsImpact(news) {
+        currentNews = news;
+        newsImpactCardEl.classList.toggle("expanded", newsImpactExpanded);
+        newsExpandButton.textContent = newsImpactExpanded ? "Collapse" : "Expand";
+
+        const items = news?.items || [];
+        newsImpactSummaryEl.textContent = news?.summary || "No matching watchlist news yet";
+        if (!items.length) {
+          setStateValue(newsImpactStateEl, "No match", "muted");
+          newsImpactListEl.innerHTML = '<div class="muted">No matching watchlist news in this refresh.</div>';
+          newsExpandButton.disabled = true;
+          return;
+        }
+
+        newsExpandButton.disabled = false;
+        const highCount = items.filter((item) => item.impact === "High").length;
+        const bearishCount = items.filter((item) => item.sentiment === "Bearish").length;
+        const bullishCount = items.filter((item) => item.sentiment === "Bullish").length;
+        const state = highCount || bearishCount > bullishCount ? "warn" : bullishCount > bearishCount ? "ok" : "muted";
+        setStateValue(newsImpactStateEl, highCount ? `${highCount} high impact` : `${items.length} updates`, state);
+
+        const visibleItems = newsImpactExpanded ? items : items.slice(0, 5);
+        newsImpactListEl.innerHTML = visibleItems
+          .map((item) => {
+            const symbols = (item.symbols || []).length ? item.symbols.slice(0, 3).join(", ") : "Market";
+            const impactClass = item.impact === "High" ? "high" : "normal";
+            const sentimentClass = String(item.sentiment || "Neutral").toLowerCase();
+            const primaryImpact = (item.coin_impacts || [])[0];
+            const strengthText = primaryImpact ? newsStrengthText(primaryImpact.strength) : "";
+            const effectLabel =
+              primaryImpact && strengthText !== "เฝ้าดู"
+                ? `${newsSentimentText(primaryImpact.direction)} ${strengthText}`
+                : newsSentimentText(primaryImpact?.direction);
+            const effectHtml = primaryImpact
+              ? `
+                <div class="news-effect">
+                  <div><strong>${escapeHtml(primaryImpact.symbol)}:</strong> ${escapeHtml(effectLabel)}</div>
+                  <div>${escapeHtml(primaryImpact.explanation)}</div>
+                  <div class="news-effect-note">${escapeHtml(primaryImpact.trade_note)}</div>
+                </div>
+              `
+              : "";
+            return `
+              <div class="news-row">
+                <a class="news-title" href="${escapeHtml(item.url || "#")}" target="_blank" rel="noreferrer">
+                  ${escapeHtml(item.title)}
+                </a>
+                <div class="news-meta">
+                  <span>${escapeHtml(item.source || "News")}</span>
+                  <span>${escapeHtml(symbols)}</span>
+                  <span class="news-tag ${impactClass}">${item.impact === "High" ? "High impact" : "General"}</span>
+                  <span class="news-tag ${sentimentClass}">${newsSentimentText(item.sentiment)}</span>
+                  <span>${escapeHtml(item.impact_reason || "")}</span>
+                </div>
+                ${effectHtml}
+              </div>
+            `;
+          })
+          .join("");
+      }
+
       async function loadNews() {
         const news = await fetchJson("/news");
         renderNewsImpact(news);
@@ -2229,6 +2312,10 @@
         setChart(currentChartSymbol, currentChartTimeframe);
       });
       testTelegramButton.addEventListener("click", testTelegram);
+      newsExpandButton.addEventListener("click", () => {
+        newsImpactExpanded = !newsImpactExpanded;
+        renderNewsImpact(currentNews);
+      });
       chart15m.addEventListener("click", () => setChart(currentChartSymbol, "15m"));
       chart30m.addEventListener("click", () => setChart(currentChartSymbol, "30m"));
       chart1h.addEventListener("click", () => setChart(currentChartSymbol, "1h"));
