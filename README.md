@@ -20,6 +20,7 @@ This app does not place trades, does not use private Binance API keys, and does 
 - Runtime health metrics for market data freshness
 - Color status badges, system event log, and Telegram system alerts
 - Market Overview gauge, risk panel, top movers, and opportunity-ranked best setups
+- Thai Market Brief summary generated from the current market overview, risk checks, and best setups
 - Telegram system alert when market bias changes
 - Docker-ready deployment
 
@@ -128,6 +129,7 @@ By default the scanner builds an automatic watchlist from Binance USDT perpetual
 The dashboard separates market context from trade triggers:
 
 - Market Overview gauge: broad 24h market bias from the active watchlist.
+- Thai Market Brief: plain Thai summary of the current bias, focus coins, risk, and action plan.
 - Top movers: strongest gainers and losers inside the active watchlist.
 - Risk Panel: Thai contextual warnings such as neutral breadth, extended movers, or BTC/ETH disagreement.
 - Best Setups Now: opportunity ranking from market bias, 24h momentum, RSI quality, volume ratio, trend alignment, liquidity rank, and near-setup status.

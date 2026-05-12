@@ -478,6 +478,25 @@
         line-height: 1.35;
       }
 
+      .thai-brief {
+        background: var(--primary-soft);
+        border: 1px solid var(--primary-border);
+        border-radius: 7px;
+        display: grid;
+        gap: 7px;
+        padding: 10px;
+      }
+
+      .brief-line {
+        color: var(--text);
+        font-size: 13px;
+        line-height: 1.35;
+      }
+
+      .brief-line strong {
+        color: var(--primary);
+      }
+
       [data-theme="dark"] .state-warn {
         background: #422006;
         color: #fde68a;
@@ -994,6 +1013,10 @@
               <span class="overview-value" id="marketCounts">Loading</span>
             </div>
           </div>
+          <div class="thai-brief" id="thaiMarketBrief">
+            <span class="metric-label">Thai Market Brief</span>
+            <div class="brief-line">กำลังสรุปภาพรวมตลาด...</div>
+          </div>
           <div class="mover-list" id="marketMovers">
             <div class="muted">Loading market overview...</div>
           </div>
@@ -1200,6 +1223,7 @@
       const marketBreadthFillEl = document.getElementById("marketBreadthFill");
       const marketCountsEl = document.getElementById("marketCounts");
       const marketMoversEl = document.getElementById("marketMovers");
+      const thaiMarketBriefEl = document.getElementById("thaiMarketBrief");
       const bestSetupsEl = document.getElementById("bestSetups");
       const riskLevelEl = document.getElementById("riskLevel");
       const riskFlagsEl = document.getElementById("riskFlags");
@@ -1407,6 +1431,19 @@
         return "กำลังโหลด";
       }
 
+      function thaiBiasText(label) {
+        if (label === "Long Bias") return "เอนเอียงฝั่ง Long";
+        if (label === "Short Bias") return "เอนเอียงฝั่ง Short";
+        if (label === "Neutral") return "เป็นกลาง";
+        return "กำลังโหลด";
+      }
+
+      function thaiSideText(side) {
+        if (side === "LONG") return "Long";
+        if (side === "SHORT") return "Short";
+        return "ดูกราฟ";
+      }
+
       async function fetchJson(path, options = {}) {
         const response = await fetch(path, {
           ...options,
@@ -1608,6 +1645,7 @@
           marketBreadthFillEl.style.width = "0%";
           marketCountsEl.textContent = "Loading";
           marketMoversEl.innerHTML = '<div class="muted">Waiting for market candles...</div>';
+          thaiMarketBriefEl.innerHTML = '<span class="metric-label">Thai Market Brief</span><div class="brief-line">กำลังสรุปภาพรวมตลาด...</div>';
           riskLevelEl.textContent = "กำลังโหลด";
           riskFlagsEl.innerHTML = '<div class="muted">กำลังรอตรวจความเสี่ยง...</div>';
           return;
@@ -1654,6 +1692,49 @@
         riskFlagsEl.innerHTML = (risk.flags || ["กำลังรอตรวจความเสี่ยง..."])
           .map((flag) => `<div class="risk-item">${escapeHtml(flag)}</div>`)
           .join("");
+      }
+
+      function renderThaiMarketBrief(overview, setups) {
+        const movers = overview?.movers || [];
+        if (!overview || !movers.length) {
+          thaiMarketBriefEl.innerHTML = '<span class="metric-label">Thai Market Brief</span><div class="brief-line">กำลังสรุปภาพรวมตลาด...</div>';
+          return;
+        }
+
+        const gainers = Number(overview.gainers || 0);
+        const losers = Number(overview.losers || 0);
+        const total = gainers + losers + Number(overview.flat || 0);
+        const average = Number(overview.average_change_pct || 0);
+        const breadth = Number(overview.breadth_pct || 0);
+        const topSetups = (setups || []).slice(0, 3);
+        const topSetupText = topSetups.length
+          ? topSetups.map((setup) => `${setup.symbol} (${thaiSideText(setup.side)} ${Number(setup.score).toFixed(0)})`).join(", ")
+          : "ยังไม่มีเหรียญเด่นจากคะแนนรวม";
+        const topGainer = movers[0];
+        const topLoser = movers[movers.length - 1];
+        const riskFlags = overview.risk?.flags || [];
+        const riskText = riskFlags[0] || "ความเสี่ยงปกติสำหรับ watchlist ปัจจุบัน";
+        const actionText =
+          overview.bias_label === "Long Bias"
+            ? "แผนหลักคือเน้นหา Long จาก Best Setups หรือ Near Setup และหลีกเลี่ยงการไล่ราคา"
+            : overview.bias_label === "Short Bias"
+              ? "แผนหลักคือเน้นหา Short จากเหรียญที่อ่อนกว่าตลาด และรอ confirmation ก่อนเข้า"
+              : "แผนหลักคือรอ confirmation ลดขนาดไม้ และเลือกเทรดเฉพาะ setup ที่ชัด";
+
+        thaiMarketBriefEl.innerHTML = `
+          <span class="metric-label">Thai Market Brief</span>
+          <div class="brief-line"><strong>ภาพรวม:</strong> ตลาดตอนนี้${thaiBiasText(overview.bias_label)} คะแนน ${Number(
+            overview.bias_score || 0
+          ).toFixed(0)}/100 โดยมีเหรียญบวก ${gainers}/${total || movers.length} ตัว, breadth ${breadth.toFixed(
+            0
+          )}% และ average gain ${formatPercent(average)}</div>
+          <div class="brief-line"><strong>เหรียญน่าดู:</strong> ${escapeHtml(topSetupText)}</div>
+          <div class="brief-line"><strong>แรงนำ/แรงอ่อน:</strong> ${escapeHtml(topGainer.symbol)} ${formatPercent(
+            topGainer.change_pct
+          )} เด่นสุด ส่วน ${escapeHtml(topLoser.symbol)} ${formatPercent(topLoser.change_pct)} อ่อนสุด</div>
+          <div class="brief-line"><strong>ความเสี่ยง:</strong> ${escapeHtml(riskText)}</div>
+          <div class="brief-line"><strong>แผน:</strong> ${escapeHtml(actionText)}</div>
+        `;
       }
 
       function renderBestSetups(setups) {
@@ -1724,6 +1805,7 @@
         renderSystemLog(status.events || []);
         renderMarketOverview(status.market_overview);
         renderBestSetups(status.best_setups || []);
+        renderThaiMarketBrief(status.market_overview, status.best_setups || []);
         currentNearSetups = status.near_setups || [];
         renderNearSetups();
 
@@ -1768,6 +1850,7 @@
         if (statusResult.status === "rejected") {
           renderMarketOverview(null);
           renderBestSetups([]);
+          renderThaiMarketBrief(null, []);
           scannerPairsEl.innerHTML = `<tr><td class="empty" colspan="5">Scanner status unavailable: ${escapeHtml(
             statusResult.reason?.message || "Unknown error"
           )}</td></tr>`;
