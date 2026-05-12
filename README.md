@@ -71,6 +71,8 @@ WATCHLIST_REFRESH_SECONDS=3600
 REST_REFRESH_SECONDS=3600
 REST_CONCURRENCY=1
 REST_BACKOFF_SECONDS=7200
+NEWS_REFRESH_SECONDS=600
+NEWS_ITEM_LIMIT=12
 BINANCE_WS_URL=wss://fstream.binance.com/market/stream
 SIGNAL_COOLDOWN_MINUTES=120
 SYSTEM_ALERT_COOLDOWN_MINUTES=30
@@ -100,6 +102,7 @@ http://localhost:8000
 - `GET /indicators`
 - `GET /symbols`
 - `GET /status`
+- `GET /news`
 - `POST /telegram/test`
 
 `/status` shows scanner runtime state, websocket state, Telegram status, market-data freshness, stale pair counts, latest system events, and latest closed candle time for every configured symbol/timeframe.
@@ -107,6 +110,8 @@ http://localhost:8000
 `/health` stays public for uptime checks and returns a compact health summary with running state, market-data status, websocket state, loaded pair counts, stale pair counts, and the latest error.
 
 `/indicators?symbol=BTCUSDT&timeframe=15m` returns recent RSI and MACD series used by the compact dashboard indicator panels.
+
+`/news` returns recent RSS news matched to the active watchlist, including simple impact, sentiment, and Thai summary text for dashboard context.
 
 `/telegram/test` sends a test Telegram message when `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` are configured.
 
@@ -130,6 +135,7 @@ The dashboard separates market context from trade triggers:
 
 - Market Overview gauge: broad 24h market bias from the active watchlist.
 - Thai Market Brief: plain Thai summary of the current bias, focus coins, risk, and action plan.
+- News Impact: RSS-based crypto news context matched to the active watchlist, with simple impact and sentiment labels.
 - Top movers: strongest gainers and losers inside the active watchlist.
 - Risk Panel: Thai contextual warnings such as neutral breadth, extended movers, or BTC/ETH disagreement.
 - Best Setups Now: opportunity ranking from market bias, 24h momentum, RSI quality, volume ratio, trend alignment, liquidity rank, and near-setup status.
@@ -139,6 +145,8 @@ The dashboard separates market context from trade triggers:
 Set `AUTO_WATCHLIST_ENABLED=false` to scan only the fixed fallback list in `app/config.py`.
 
 `REST_REFRESH_SECONDS` controls how often the app reloads closed candles from Binance REST. The websocket handles live closed-candle updates between refreshes, so the default is intentionally conservative for hosted environments with shared outbound IPs. `REST_CONCURRENCY` limits simultaneous Binance REST requests. `REST_BACKOFF_SECONDS` pauses REST refreshes after Binance returns HTTP 418 or 429 so the app does not keep hitting a temporarily blocked or rate-limited IP.
+
+`NEWS_REFRESH_SECONDS` controls how often the app refreshes crypto RSS feeds for the dashboard News Impact panel. News is used only as trading context and risk awareness; price signals still come from closed candles and indicator rules.
 
 ## Docker
 

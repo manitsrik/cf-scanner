@@ -11,6 +11,7 @@ from fastapi.staticfiles import StaticFiles
 from app.auth import ApiAuth, create_session_token, redirect_to_dashboard, require_page_auth, verify_password
 from app.config import get_settings
 from app.models import Signal, SymbolInfo
+from app.news import CryptoNewsService
 from app.scanner import FuturesScanner
 from app.store import SignalStore
 from app.telegram import TelegramAlerter
@@ -21,6 +22,10 @@ settings = get_settings()
 store = SignalStore(limit=settings.signal_limit, db_path=settings.signal_db_path)
 alerter = TelegramAlerter(settings.telegram_bot_token, settings.telegram_chat_id)
 scanner = FuturesScanner(settings=settings, store=store, alerter=alerter)
+news_service = CryptoNewsService(
+    refresh_seconds=settings.news_refresh_seconds,
+    item_limit=settings.news_item_limit,
+)
 scanner_task: asyncio.Task | None = None
 
 
@@ -130,6 +135,11 @@ async def status(_: None = ApiAuth) -> dict:
 @app.get("/indicators")
 async def indicators(symbol: str, timeframe: str, _: None = ApiAuth) -> dict:
     return scanner.indicator_series(symbol, timeframe)
+
+
+@app.get("/news")
+async def news(_: None = ApiAuth) -> dict:
+    return await news_service.latest(scanner.symbols())
 
 
 @app.post("/telegram/test")

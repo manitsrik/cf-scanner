@@ -18,6 +18,8 @@ class Settings(BaseSettings):
     rest_refresh_seconds: int = 3600
     rest_concurrency: int = 1
     rest_backoff_seconds: int = 7200
+    news_refresh_seconds: int = 600
+    news_item_limit: int = 12
     kline_limit: int = 250
     binance_rest_url: str = "https://fapi.binance.com"
     binance_ws_url: str = "wss://fstream.binance.com/market/stream"

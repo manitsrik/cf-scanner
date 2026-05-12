@@ -378,6 +378,94 @@
         padding-right: 2px;
       }
 
+      .news-impact {
+        background: var(--surface-muted);
+        border: 1px solid var(--border-soft);
+        border-radius: 7px;
+        display: grid;
+        gap: 8px;
+        padding: 10px;
+      }
+
+      .news-impact-head {
+        align-items: start;
+        display: flex;
+        gap: 10px;
+        justify-content: space-between;
+      }
+
+      .news-summary {
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.35;
+        text-align: right;
+      }
+
+      .news-list {
+        display: grid;
+        gap: 7px;
+        max-height: 178px;
+        overflow: auto;
+        padding-right: 2px;
+      }
+
+      .news-row {
+        border-top: 1px solid var(--border-soft);
+        display: grid;
+        gap: 5px;
+        padding-top: 7px;
+      }
+
+      .news-row:first-child {
+        border-top: 0;
+        padding-top: 0;
+      }
+
+      .news-title {
+        color: var(--text);
+        font-size: 13px;
+        font-weight: 800;
+        line-height: 1.35;
+        text-decoration: none;
+      }
+
+      .news-title:hover {
+        color: var(--primary);
+      }
+
+      .news-meta {
+        align-items: center;
+        color: var(--muted);
+        display: flex;
+        flex-wrap: wrap;
+        font-size: 11px;
+        gap: 6px;
+      }
+
+      .news-tag {
+        border-radius: 999px;
+        font-weight: 850;
+        padding: 2px 7px;
+      }
+
+      .news-tag.high,
+      .news-tag.bearish {
+        background: var(--short-bg);
+        color: var(--short-text);
+      }
+
+      .news-tag.bullish {
+        background: var(--long-bg);
+        color: var(--long-text);
+      }
+
+      .news-tag.neutral,
+      .news-tag.normal {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        color: var(--muted);
+      }
+
       .mover-row {
         align-items: center;
         display: grid;
@@ -1066,6 +1154,18 @@
             <span class="metric-label">Thai Market Brief</span>
             <div class="brief-line">กำลังสรุปภาพรวมตลาด...</div>
           </div>
+          <div class="news-impact" aria-label="News impact">
+            <div class="news-impact-head">
+              <div>
+                <span class="metric-label">News Impact</span>
+                <div class="overview-value" id="newsImpactState">Loading</div>
+              </div>
+              <div class="news-summary" id="newsImpactSummary">กำลังดึงข่าวล่าสุด...</div>
+            </div>
+            <div class="news-list" id="newsImpactList">
+              <div class="muted">Waiting for news...</div>
+            </div>
+          </div>
           <div class="mover-list" id="marketMovers">
             <div class="muted">Loading market overview...</div>
           </div>
@@ -1273,6 +1373,9 @@
       const marketCountsEl = document.getElementById("marketCounts");
       const marketMoversEl = document.getElementById("marketMovers");
       const thaiMarketBriefEl = document.getElementById("thaiMarketBrief");
+      const newsImpactStateEl = document.getElementById("newsImpactState");
+      const newsImpactSummaryEl = document.getElementById("newsImpactSummary");
+      const newsImpactListEl = document.getElementById("newsImpactList");
       const bestSetupsEl = document.getElementById("bestSetups");
       const riskLevelEl = document.getElementById("riskLevel");
       const riskFlagsEl = document.getElementById("riskFlags");
@@ -1685,6 +1788,51 @@
           .join("");
       }
 
+      function newsSentimentText(sentiment) {
+        if (sentiment === "Bullish") return "บวก";
+        if (sentiment === "Bearish") return "ลบ";
+        return "กลาง";
+      }
+
+      function renderNewsImpact(news) {
+        const items = news?.items || [];
+        newsImpactSummaryEl.textContent = news?.summary || "ยังไม่มีข่าวที่ตรงกับ watchlist";
+        if (!items.length) {
+          setStateValue(newsImpactStateEl, "No match", "muted");
+          newsImpactListEl.innerHTML = '<div class="muted">ยังไม่พบข่าวที่ตรงกับ watchlist ในรอบนี้</div>';
+          return;
+        }
+
+        const highCount = items.filter((item) => item.impact === "High").length;
+        const bearishCount = items.filter((item) => item.sentiment === "Bearish").length;
+        const bullishCount = items.filter((item) => item.sentiment === "Bullish").length;
+        const state = highCount || bearishCount > bullishCount ? "warn" : bullishCount > bearishCount ? "ok" : "muted";
+        setStateValue(newsImpactStateEl, highCount ? `${highCount} high impact` : `${items.length} updates`, state);
+
+        newsImpactListEl.innerHTML = items
+          .slice(0, 5)
+          .map((item) => {
+            const symbols = (item.symbols || []).length ? item.symbols.slice(0, 3).join(", ") : "Market";
+            const impactClass = item.impact === "High" ? "high" : "normal";
+            const sentimentClass = String(item.sentiment || "Neutral").toLowerCase();
+            return `
+              <div class="news-row">
+                <a class="news-title" href="${escapeHtml(item.url || "#")}" target="_blank" rel="noreferrer">
+                  ${escapeHtml(item.title)}
+                </a>
+                <div class="news-meta">
+                  <span>${escapeHtml(item.source || "News")}</span>
+                  <span>${escapeHtml(symbols)}</span>
+                  <span class="news-tag ${impactClass}">${item.impact === "High" ? "สำคัญ" : "ทั่วไป"}</span>
+                  <span class="news-tag ${sentimentClass}">${newsSentimentText(item.sentiment)}</span>
+                  <span>${escapeHtml(item.impact_reason || "")}</span>
+                </div>
+              </div>
+            `;
+          })
+          .join("");
+      }
+
       function renderSystemLog(events) {
         if (!events.length) {
           systemLogEl.innerHTML = '<tr><td class="empty" colspan="3">Waiting for system events...</td></tr>';
@@ -1906,8 +2054,13 @@
         renderSignals();
       }
 
+      async function loadNews() {
+        const news = await fetchJson("/news");
+        renderNewsImpact(news);
+      }
+
       async function refreshAll() {
-        const [signalsResult, statusResult] = await Promise.allSettled([loadSignals(), loadStatus()]);
+        const [signalsResult, statusResult, newsResult] = await Promise.allSettled([loadSignals(), loadStatus(), loadNews()]);
         const errors = [signalsResult, statusResult]
           .filter((result) => result.status === "rejected")
           .map((result) => result.reason?.message || "Unknown API error");
@@ -1928,6 +2081,14 @@
           scannerPairsEl.innerHTML = `<tr><td class="empty" colspan="5">Scanner status unavailable: ${escapeHtml(
             statusResult.reason?.message || "Unknown error"
           )}</td></tr>`;
+        }
+
+        if (newsResult.status === "rejected") {
+          setStateValue(newsImpactStateEl, "Unavailable", "warn");
+          newsImpactSummaryEl.textContent = "ดึงข่าวไม่ได้ชั่วคราว";
+          newsImpactListEl.innerHTML = `<div class="muted">News API unavailable: ${escapeHtml(
+            newsResult.reason?.message || "Unknown error"
+          )}</div>`;
         }
 
         if (errors.length) {
