@@ -800,6 +800,36 @@
         max-width: 520px;
       }
 
+      .detail-grid {
+        display: grid;
+        gap: 8px;
+        grid-template-columns: minmax(220px, 0.9fr) minmax(260px, 1.1fr);
+      }
+
+      .detail-block {
+        background: var(--surface-muted);
+        border: 1px solid var(--border-soft);
+        border-radius: 7px;
+        display: grid;
+        gap: 5px;
+        padding: 8px 10px;
+      }
+
+      .quality-score {
+        font-size: 12px;
+        font-weight: 850;
+      }
+
+      .news-context {
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.35;
+      }
+
+      .news-context strong {
+        color: var(--text);
+      }
+
       .event-level {
         border-radius: 999px;
         display: inline-flex;
@@ -964,6 +994,10 @@
         .setup-row .link-button {
           grid-column: 1 / -1;
           justify-content: flex-start;
+        }
+
+        .detail-grid {
+          grid-template-columns: 1fr;
         }
 
         .metric.wide {
@@ -1254,13 +1288,15 @@
                 <th>Price</th>
                 <th>RSI</th>
                 <th>Volume Status</th>
+                <th>Quality</th>
+                <th>News</th>
                 <th>Created Time</th>
                 <th>Chart</th>
               </tr>
             </thead>
             <tbody id="signals">
               <tr>
-                <td class="empty" colspan="8">Waiting for signals...</td>
+                <td class="empty" colspan="10">Waiting for signals...</td>
               </tr>
             </tbody>
           </table>
@@ -1624,6 +1660,25 @@
         return true;
       }
 
+      function qualityState(label, score) {
+        if (label === "Excellent" || Number(score) >= 85) return "ok";
+        if (label === "Strong" || Number(score) >= 70) return "ok";
+        if (label === "Caution" || Number(score) >= 55) return "warn";
+        return "muted";
+      }
+
+      function newsRelationState(context) {
+        if (!context || context.relation === "neutral") return "muted";
+        if (context.relation === "conflicts") return "error";
+        return "ok";
+      }
+
+      function newsRelationText(context) {
+        if (!context || context.relation === "neutral") return "No news";
+        if (context.relation === "conflicts") return "News conflict";
+        return "News supports";
+      }
+
       function resetSignalVisibleLimit() {
         signalVisibleLimit = Number(signalLimitSelect.value);
       }
@@ -1672,7 +1727,7 @@
         if (!signals.length) {
           signalResultNote.textContent = "";
           loadMoreSignalsButton.classList.add("hidden");
-          signalsEl.innerHTML = '<tr><td class="empty" colspan="8">No signals match your filters.</td></tr>';
+          signalsEl.innerHTML = '<tr><td class="empty" colspan="10">No signals match your filters.</td></tr>';
           return;
         }
 
@@ -1685,8 +1740,11 @@
         loadMoreSignalsButton.classList.toggle("hidden", visibleCount >= signals.length);
 
         signalsEl.innerHTML = visibleSignals
-          .map(
-            (signal) => `
+          .map((signal) => {
+            const qualityScore = Number(signal.quality_score || 0);
+            const qualityLabel = signal.quality_label || "Legacy";
+            const newsContext = signal.news_context || {};
+            return `
               <tr>
                 <td>${coinCell(signal.symbol)}</td>
                 <td>${signal.timeframe}</td>
@@ -1694,19 +1752,42 @@
                 <td>${formatPrice(signal.price)}</td>
                 <td>${Number(signal.rsi).toFixed(2)}</td>
                 <td>${signal.volume_status}</td>
+                <td>
+                  <span class="quality-score state-${qualityState(qualityLabel, qualityScore)}">
+                    ${escapeHtml(qualityLabel)}${qualityScore ? ` ${qualityScore.toFixed(0)}` : ""}
+                  </span>
+                </td>
+                <td><span class="state-${newsRelationState(newsContext)}">${newsRelationText(newsContext)}</span></td>
                 <td class="muted">${formatTime(signal.created_at)}</td>
                 <td>${chartButton(signal.symbol, signal.timeframe)}</td>
               </tr>
               <tr>
                 <td></td>
-                <td colspan="7">
-                  <div class="detail-list">
-                    ${(signal.reasons || []).map((reason) => `<div>${escapeHtml(reason)}</div>`).join("")}
+                <td colspan="9">
+                  <div class="detail-grid">
+                    <div class="detail-block">
+                      <span class="metric-label">Signal Quality</span>
+                      <div class="detail-list">
+                        ${(signal.quality_reasons || signal.reasons || []).map((reason) => `<div>${escapeHtml(reason)}</div>`).join("")}
+                      </div>
+                    </div>
+                    <div class="detail-block">
+                      <span class="metric-label">News Conflict Warning</span>
+                      <div class="news-context">
+                        <div><strong>${newsRelationText(newsContext)}:</strong> ${escapeHtml(newsContext.explanation || "ยังไม่พบข่าวล่าสุดที่กระทบสัญญาณนี้โดยตรง")}</div>
+                        <div>${escapeHtml(newsContext.trade_note || "ใช้ technical signal เป็นหลัก และตรวจข่าวก่อนเข้าไม้จริง")}</div>
+                        ${
+                          newsContext.headline
+                            ? `<div><a href="${escapeHtml(newsContext.url || "#")}" target="_blank" rel="noreferrer">${escapeHtml(newsContext.headline)}</a></div>`
+                            : ""
+                        }
+                      </div>
+                    </div>
                   </div>
                 </td>
               </tr>
-            `
-          )
+            `;
+          })
           .join("");
       }
 
@@ -2002,7 +2083,7 @@
         if (!currentSignals.length) {
           signalResultNote.textContent = "";
           loadMoreSignalsButton.classList.add("hidden");
-          signalsEl.innerHTML = '<tr><td class="empty" colspan="8">Waiting for signals...</td></tr>';
+          signalsEl.innerHTML = '<tr><td class="empty" colspan="10">Waiting for signals...</td></tr>';
           return;
         }
 
@@ -2090,7 +2171,7 @@
         if (signalsResult.status === "rejected") {
           signalResultNote.textContent = "";
           loadMoreSignalsButton.classList.add("hidden");
-          signalsEl.innerHTML = `<tr><td class="empty" colspan="8">Signal API unavailable: ${escapeHtml(
+          signalsEl.innerHTML = `<tr><td class="empty" colspan="10">Signal API unavailable: ${escapeHtml(
             signalsResult.reason?.message || "Unknown error"
           )}</td></tr>`;
         }

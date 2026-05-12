@@ -140,7 +140,7 @@ The dashboard separates market context from trade triggers:
 - Risk Panel: Thai contextual warnings such as neutral breadth, extended movers, or BTC/ETH disagreement.
 - Best Setups Now: opportunity ranking from market bias, 24h momentum, RSI quality, volume ratio, trend alignment, liquidity rank, and near-setup status.
 - Near Setups: markets close to the scanner rules but not crossed yet.
-- Signals: closed-candle setups that passed all configured checks.
+- Signals: closed-candle setups that passed all configured checks, with signal quality and news conflict context.
 
 Set `AUTO_WATCHLIST_ENABLED=false` to scan only the fixed fallback list in `app/config.py`.
 

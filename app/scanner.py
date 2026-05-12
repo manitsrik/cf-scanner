@@ -448,6 +448,7 @@ class FuturesScanner:
 
         close_time = latest["close_time"].to_pydatetime()
         signal_id = f"{symbol}:{timeframe}:{int(close_time.timestamp())}:{signal_type}"
+        quality = self._signal_quality(signal_type, price, ema_9, ema_21, ema_200, rsi, volume_ratio)
         return Signal(
             id=signal_id,
             symbol=symbol,
@@ -466,9 +467,50 @@ class FuturesScanner:
                 "rsi_14": rsi,
                 "volume_ratio": volume_ratio,
             },
+            quality_score=quality["score"],
+            quality_label=quality["label"],
+            quality_reasons=quality["reasons"],
             created_at=datetime.now(timezone.utc),
             tradingview_url=f"https://www.tradingview.com/chart/?symbol=BINANCE:{symbol}.P",
         )
+
+    def _signal_quality(
+        self,
+        signal_type: str,
+        price: float,
+        ema_9: float,
+        ema_21: float,
+        ema_200: float,
+        rsi: float,
+        volume_ratio: float,
+    ) -> dict:
+        trend_distance_pct = abs(price - ema_200) / price * 100 if price > 0 else 0
+        cross_gap_pct = abs(ema_9 - ema_21) / price * 100 if price > 0 else 0
+        trend_score = self._clamp(trend_distance_pct / 1.2 * 100, 35, 100)
+        cross_score = self._clamp(cross_gap_pct / 0.35 * 100, 35, 100)
+        volume_score = self._clamp(volume_ratio / 1.8 * 100, 35, 100)
+        rsi_score = self._rsi_quality_score(signal_type, rsi)
+        score = self._clamp(
+            trend_score * 0.28 + cross_score * 0.2 + rsi_score * 0.24 + volume_score * 0.28,
+            0,
+            100,
+        )
+        if score >= 85:
+            label = "Excellent"
+        elif score >= 70:
+            label = "Strong"
+        elif score >= 55:
+            label = "Caution"
+        else:
+            label = "Weak"
+
+        reasons = [
+            f"Trend distance {trend_distance_pct:.2f}% from EMA200",
+            f"EMA cross gap {cross_gap_pct:.3f}%",
+            f"RSI quality {rsi_score:.0f}/100",
+            f"Volume strength {volume_ratio:.2f}x avg20",
+        ]
+        return {"score": score, "label": label, "reasons": reasons}
 
     def _indicator_snapshot(self, candles: pd.DataFrame) -> dict | None:
         if len(candles) < 200:

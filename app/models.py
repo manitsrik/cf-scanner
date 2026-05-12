@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 SignalType = Literal["LONG", "SHORT"]
@@ -19,6 +19,10 @@ class Signal(BaseModel):
     volume_status: str
     reasons: list[str]
     indicators: dict[str, float]
+    quality_score: float | None = None
+    quality_label: str | None = None
+    quality_reasons: list[str] = Field(default_factory=list)
+    news_context: dict | None = None
     created_at: datetime
     tradingview_url: str
 

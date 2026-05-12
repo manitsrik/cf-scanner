@@ -119,7 +119,111 @@ async def health() -> dict:
 
 @app.get("/signals", response_model=list[Signal])
 async def signals(_: None = ApiAuth) -> list[Signal]:
-    return store.list()
+    news_payload = await news_service.latest(scanner.symbols())
+    return [_with_news_context(signal, news_payload) for signal in store.list()]
+
+
+def _with_news_context(signal: Signal, news_payload: dict) -> Signal:
+    contexts = []
+    for item in news_payload.get("items", []):
+        impacts = item.get("coin_impacts") or []
+        matched = next((impact for impact in impacts if impact.get("symbol") == signal.symbol), None)
+        if not matched:
+            matched = next((impact for impact in impacts if impact.get("symbol") == "Market"), None)
+        if not matched:
+            continue
+
+        direction = matched.get("direction")
+        if direction not in {"Bullish", "Bearish"}:
+            continue
+        signal_bias = "Bullish" if signal.signal_type == "LONG" else "Bearish"
+        relation = "supports" if direction == signal_bias else "conflicts"
+        contexts.append(
+            {
+                "relation": relation,
+                "symbol": matched.get("symbol"),
+                "direction": direction,
+                "strength": matched.get("strength"),
+                "headline": item.get("title"),
+                "source": item.get("source"),
+                "url": item.get("url"),
+                "explanation": matched.get("explanation"),
+                "trade_note": matched.get("trade_note"),
+            }
+        )
+
+    conflict = next((context for context in contexts if context["relation"] == "conflicts"), None)
+    support = next((context for context in contexts if context["relation"] == "supports"), None)
+    selected = conflict or support
+    if not selected:
+        selected = {
+            "relation": "neutral",
+            "headline": None,
+            "source": None,
+            "explanation": "ยังไม่พบข่าวล่าสุดที่กระทบสัญญาณนี้โดยตรง",
+            "trade_note": "ใช้ technical signal เป็นหลัก และตรวจข่าวก่อนเข้าไม้จริง",
+        }
+    update = {"news_context": selected}
+    if signal.quality_score is None:
+        update.update(_legacy_quality(signal))
+    return signal.model_copy(update=update)
+
+
+def _legacy_quality(signal: Signal) -> dict:
+    indicators = signal.indicators or {}
+    price = float(signal.price or 0)
+    ema_9 = float(indicators.get("ema_9") or 0)
+    ema_21 = float(indicators.get("ema_21") or 0)
+    ema_200 = float(indicators.get("ema_200") or 0)
+    rsi = float(indicators.get("rsi_14") or signal.rsi or 0)
+    volume_ratio = float(indicators.get("volume_ratio") or 0)
+    trend_distance_pct = abs(price - ema_200) / price * 100 if price > 0 and ema_200 > 0 else 0
+    cross_gap_pct = abs(ema_9 - ema_21) / price * 100 if price > 0 and ema_9 > 0 and ema_21 > 0 else 0
+    trend_score = _clamp(trend_distance_pct / 1.2 * 100, 35, 100)
+    cross_score = _clamp(cross_gap_pct / 0.35 * 100, 35, 100)
+    volume_score = _clamp(volume_ratio / 1.8 * 100, 35, 100)
+    rsi_score = _rsi_quality_score(signal.signal_type, rsi)
+    score = _clamp(trend_score * 0.28 + cross_score * 0.2 + rsi_score * 0.24 + volume_score * 0.28, 0, 100)
+    if score >= 85:
+        label = "Excellent"
+    elif score >= 70:
+        label = "Strong"
+    elif score >= 55:
+        label = "Caution"
+    else:
+        label = "Weak"
+    return {
+        "quality_score": score,
+        "quality_label": label,
+        "quality_reasons": [
+            f"Trend distance {trend_distance_pct:.2f}% from EMA200",
+            f"EMA cross gap {cross_gap_pct:.3f}%",
+            f"RSI quality {rsi_score:.0f}/100",
+            f"Volume strength {volume_ratio:.2f}x avg20",
+        ],
+    }
+
+
+def _rsi_quality_score(side: str, rsi: float) -> float:
+    if side == "LONG":
+        if 50 <= rsi <= 68:
+            return 100
+        if 45 <= rsi < 50:
+            return 70
+        if 68 < rsi <= 75:
+            return 65
+        return 35
+    if 32 <= rsi <= 50:
+        return 100
+    if 50 < rsi <= 55:
+        return 70
+    if 25 <= rsi < 32:
+        return 65
+    return 35
+
+
+def _clamp(value: float, minimum: float, maximum: float) -> float:
+    return max(minimum, min(maximum, value))
 
 
 @app.get("/symbols", response_model=SymbolInfo)
