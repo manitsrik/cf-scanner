@@ -452,6 +452,16 @@ class FuturesScanner:
         trade_plan = self._trade_plan(signal_type, df, len(df) - 1)
         backtest = self._signal_backtest(df, signal_type)
         status = self._signal_status(signal_type, trade_plan, df, close_time)
+        trader_summary = self._trader_summary(
+            signal_type=signal_type,
+            quality_label=quality["label"],
+            quality_score=quality["score"],
+            rsi=rsi,
+            volume_ratio=volume_ratio,
+            trade_plan=trade_plan,
+            backtest=backtest,
+            status=status,
+        )
         return Signal(
             id=signal_id,
             symbol=symbol,
@@ -476,6 +486,7 @@ class FuturesScanner:
             trade_plan=trade_plan,
             backtest=backtest,
             status=status,
+            trader_summary=trader_summary,
             created_at=datetime.now(timezone.utc),
             tradingview_url=f"https://www.tradingview.com/chart/?symbol=BINANCE:{symbol}.P",
         )
@@ -495,7 +506,17 @@ class FuturesScanner:
         trade_plan = signal.trade_plan or self._trade_plan(signal.signal_type, df, signal_index)
         backtest = signal.backtest or self._signal_backtest(df, signal.signal_type)
         status = self._signal_status(signal.signal_type, trade_plan, df, signal_time)
-        return {"trade_plan": trade_plan, "backtest": backtest, "status": status}
+        trader_summary = signal.trader_summary or self._trader_summary(
+            signal_type=signal.signal_type,
+            quality_label=signal.quality_label,
+            quality_score=signal.quality_score,
+            rsi=float(signal.rsi or 0),
+            volume_ratio=float((signal.indicators or {}).get("volume_ratio") or 0),
+            trade_plan=trade_plan,
+            backtest=backtest,
+            status=status,
+        )
+        return {"trade_plan": trade_plan, "backtest": backtest, "status": status, "trader_summary": trader_summary}
 
     def _trade_plan(self, signal_type: str, df: pd.DataFrame, index: int | None = None) -> dict:
         if df.empty:
@@ -636,6 +657,83 @@ class FuturesScanner:
             "current_move_pct": move_pct,
             "updated_at": latest_time,
         }
+
+    def _trader_summary(
+        self,
+        signal_type: str,
+        quality_label: str | None,
+        quality_score: float | None,
+        rsi: float,
+        volume_ratio: float,
+        trade_plan: dict,
+        backtest: dict,
+        status: dict,
+        news_context: dict | None = None,
+    ) -> str:
+        side_thai = "Long" if signal_type == "LONG" else "Short"
+        score = float(quality_score or 0)
+        risk_pct = float(trade_plan.get("risk_pct") or 0)
+        win_rate = float(backtest.get("win_rate") or 0)
+        sample_size = int(backtest.get("sample_size") or 0)
+        state = status.get("state")
+        relation = (news_context or {}).get("relation")
+
+        strengths = []
+        cautions = []
+
+        if score >= 85:
+            strengths.append(f"สัญญาณ {side_thai} แข็งแรงมากจาก quality {quality_label or ''} {score:.0f}")
+        elif score >= 70:
+            strengths.append(f"สัญญาณ {side_thai} ค่อนข้างดี quality {quality_label or ''} {score:.0f}")
+        elif score >= 55:
+            cautions.append("คุณภาพสัญญาณยังระดับต้องระวัง ควรรอ confirmation เพิ่ม")
+        else:
+            cautions.append("คุณภาพสัญญาณอ่อน ยังไม่เหมาะกับการรีบเข้าไม้")
+
+        if volume_ratio >= 2:
+            strengths.append(f"volume หนุนชัด {volume_ratio:.2f}x avg20")
+        elif volume_ratio >= 1:
+            strengths.append(f"volume ผ่านเกณฑ์ {volume_ratio:.2f}x avg20")
+
+        if signal_type == "LONG" and rsi >= 68:
+            cautions.append(f"RSI {rsi:.2f} เริ่มสูง ระวังไล่ราคา")
+        if signal_type == "SHORT" and rsi <= 32:
+            cautions.append(f"RSI {rsi:.2f} เริ่มต่ำ ระวังขายตามปลายทาง")
+
+        if risk_pct >= 6:
+            cautions.append(f"stop ค่อนข้างไกล {risk_pct:.2f}% ควรลดขนาดไม้")
+        elif 0 < risk_pct <= 3:
+            strengths.append(f"risk ต่อไม้คุมง่ายประมาณ {risk_pct:.2f}%")
+
+        if sample_size >= 5:
+            if win_rate >= 55:
+                strengths.append(f"backtest ระยะสั้นหนุน win rate {win_rate:.0f}% จาก {sample_size} ตัวอย่าง")
+            elif win_rate <= 40:
+                cautions.append(f"backtest ระยะสั้นยังไม่สวย win rate {win_rate:.0f}% จาก {sample_size} ตัวอย่าง")
+        else:
+            cautions.append("backtest ยังมีตัวอย่างน้อย ใช้เป็นบริบทเท่านั้น")
+
+        if relation == "conflicts":
+            cautions.append("มีข่าวขัดกับทิศทางสัญญาณ ควรรอความผันผวนสงบหรือใช้ size เล็ก")
+        elif relation == "supports":
+            strengths.append("ข่าวล่าสุดหนุนทิศทางสัญญาณ")
+
+        if state == "tp1":
+            action = "สัญญาณนี้ถึง TP1 แล้ว ไม่ควรไล่เข้าใหม่ถ้าไม่มี setup ใหม่ ให้เน้นจัดการกำไรหรือรอย่อ"
+        elif state == "stopped":
+            action = "สัญญาณนี้โดน stop แล้ว ควรตัดออกจากแผนและรอสัญญาณใหม่"
+        elif state == "expired":
+            action = "สัญญาณหมดอายุแล้ว เพราะไม่ไปถึง TP1 หรือ SL ในกรอบเวลาที่กำหนด ควรรอ setup ใหม่"
+        elif score >= 85 and risk_pct <= 6 and relation != "conflicts":
+            action = "แผนที่เหมาะคือรอราคาอยู่ใน entry zone แล้วค่อยพิจารณาเข้า ไม่ไล่ราคา และวาง stop ตามแผน"
+        elif score >= 70:
+            action = "ใช้เป็น setup เฝ้าดูได้ แต่ควรรอแท่งยืนยันหรือจังหวะย่อเข้าใกล้ entry zone ก่อน"
+        else:
+            action = "ยังไม่ควรรีบเข้าไม้ ให้รอ confirmation เพิ่มหรือเลือก setup ที่คุณภาพสูงกว่า"
+
+        strength_text = " จุดแข็ง: " + "; ".join(strengths[:3]) + "." if strengths else ""
+        caution_text = " ข้อควรระวัง: " + "; ".join(cautions[:3]) + "." if cautions else ""
+        return f"สรุปแบบเทรดเดอร์: {action}{strength_text}{caution_text}"
 
     def _historical_signal_matches(self, df: pd.DataFrame, index: int, signal_type: str) -> bool:
         latest = df.iloc[index]

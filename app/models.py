@@ -25,6 +25,7 @@ class Signal(BaseModel):
     trade_plan: dict = Field(default_factory=dict)
     backtest: dict = Field(default_factory=dict)
     status: dict = Field(default_factory=dict)
+    trader_summary: str | None = None
     news_context: dict | None = None
     created_at: datetime
     tradingview_url: str

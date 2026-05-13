@@ -167,6 +167,17 @@ def _with_news_context(signal: Signal, news_payload: dict) -> Signal:
     update.update(scanner.enrich_signal_context(signal))
     if signal.quality_score is None:
         update.update(_legacy_quality(signal))
+    update["trader_summary"] = scanner._trader_summary(
+        signal_type=signal.signal_type,
+        quality_label=update.get("quality_label") or signal.quality_label,
+        quality_score=update.get("quality_score") or signal.quality_score,
+        rsi=float(signal.rsi or 0),
+        volume_ratio=float((signal.indicators or {}).get("volume_ratio") or 0),
+        trade_plan=update.get("trade_plan") or signal.trade_plan or {},
+        backtest=update.get("backtest") or signal.backtest or {},
+        status=update.get("status") or signal.status or {},
+        news_context=selected,
+    )
     return signal.model_copy(update=update)
 
 
