@@ -1,5 +1,7 @@
 from functools import lru_cache
 from hashlib import sha256
+import os
+from pathlib import Path
 import secrets
 
 from pydantic import Field
@@ -26,6 +28,7 @@ class Settings(BaseSettings):
     telegram_bot_token: str | None = None
     telegram_chat_id: str | None = None
     signal_db_path: str = "data/signals.db"
+    railway_volume_mount_path: str | None = None
     signal_limit: int = 100
     signal_cooldown_minutes: int = 120
     system_alert_cooldown_minutes: int = 30
@@ -37,6 +40,9 @@ class Settings(BaseSettings):
     session_cookie_secure: bool = True
 
     def model_post_init(self, __context: object) -> None:
+        if self.railway_volume_mount_path and "SIGNAL_DB_PATH" not in os.environ:
+            self.signal_db_path = str(Path(self.railway_volume_mount_path) / "signals.db")
+
         if self.session_secret:
             return
         if self.dashboard_password:

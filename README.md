@@ -127,6 +127,8 @@ Signals are saved to SQLite at `SIGNAL_DB_PATH`, which defaults to `data/signals
 
 Keep `data/` out of git because it contains runtime state. On hosted platforms with ephemeral disks, configure a persistent volume if you need signal history to survive redeploys.
 
+On Railway, attach a Volume to the service to keep signal history across redeploys. If you mount it anywhere, Railway provides `RAILWAY_VOLUME_MOUNT_PATH` and the app will automatically store signals at `${RAILWAY_VOLUME_MOUNT_PATH}/signals.db` unless `SIGNAL_DB_PATH` is set explicitly. If you prefer the default relative path, mount the volume to `/app/data`.
+
 ## Watchlist
 
 By default the scanner builds an automatic watchlist from Binance USDT perpetual futures. It ranks markets by 24h `quoteVolume` and scans the top `AUTO_WATCHLIST_SIZE` symbols. The default is `20`, which gives the Market Overview gauge a broader read than the original 8-symbol watchlist while still keeping Binance REST usage modest.
@@ -182,6 +184,7 @@ Do not commit `.env`. Use `.env.example` as the template.
 - `TELEGRAM_BOT_TOKEN`
 - `TELEGRAM_CHAT_ID`
 - `SIGNAL_DB_PATH`
+- `RAILWAY_VOLUME_MOUNT_PATH` (provided automatically when a Railway Volume is attached)
 - `SIGNAL_LIMIT`
 - `AUTO_WATCHLIST_ENABLED`
 - `AUTO_WATCHLIST_SIZE`
