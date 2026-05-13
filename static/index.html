@@ -686,6 +686,14 @@
         margin: -2px 0 10px;
       }
 
+      .signal-controls {
+        align-items: center;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        justify-content: space-between;
+      }
+
       .table-footer {
         display: flex;
         justify-content: center;
@@ -702,6 +710,10 @@
         border-radius: 8px;
         max-height: 360px;
         overflow: auto;
+      }
+
+      .signals-table-wrap {
+        max-height: min(72vh, 720px);
       }
 
       table {
@@ -809,19 +821,19 @@
       .detail-list {
         color: var(--muted);
         display: grid;
-        gap: 4px;
-        line-height: 1.35;
-        margin-top: 8px;
+        gap: 7px;
+        line-height: 1.5;
+        margin-top: 10px;
         white-space: normal;
       }
 
       .detail-list div {
-        max-width: 520px;
+        max-width: none;
       }
 
       .detail-grid {
         display: grid;
-        gap: 8px;
+        gap: 10px;
         grid-template-columns: minmax(220px, 0.9fr) minmax(260px, 1.1fr);
       }
 
@@ -830,8 +842,23 @@
         border: 1px solid var(--border-soft);
         border-radius: 7px;
         display: grid;
-        gap: 5px;
-        padding: 8px 10px;
+        gap: 6px;
+        padding: 12px 14px;
+      }
+
+      .signal-detail-row td {
+        background: var(--surface);
+        padding: 0 16px 14px;
+        white-space: normal;
+      }
+
+      .detail-toggle {
+        background: var(--primary-soft);
+        border: 1px solid var(--primary-border);
+        border-radius: 999px;
+        color: var(--primary);
+        min-height: 28px;
+        padding: 0 10px;
       }
 
       .quality-score {
@@ -841,8 +868,8 @@
 
       .news-context {
         color: var(--muted);
-        font-size: 12px;
-        line-height: 1.35;
+        font-size: 13px;
+        line-height: 1.5;
       }
 
       .news-context strong {
@@ -1296,9 +1323,12 @@
             <option value="20" selected>Show 20</option>
             <option value="50">Show 50</option>
           </select>
+          <button class="secondary" id="toggleSignalDetailsButton" type="button">Expand all details</button>
         </div>
-        <div id="signalResultNote" class="result-note"></div>
-        <div class="table-wrap">
+        <div class="signal-controls">
+          <div id="signalResultNote" class="result-note"></div>
+        </div>
+        <div class="table-wrap signals-table-wrap">
           <table>
             <thead>
               <tr>
@@ -1311,12 +1341,13 @@
                 <th>Quality</th>
                 <th>News</th>
                 <th>Created Time</th>
+                <th>Details</th>
                 <th>Chart</th>
               </tr>
             </thead>
             <tbody id="signals">
               <tr>
-                <td class="empty" colspan="10">Waiting for signals...</td>
+                <td class="empty" colspan="11">Waiting for signals...</td>
               </tr>
             </tbody>
           </table>
@@ -1430,6 +1461,7 @@
       const signalAgeFilter = document.getElementById("signalAgeFilter");
       const signalLimitSelect = document.getElementById("signalLimitSelect");
       const signalResultNote = document.getElementById("signalResultNote");
+      const toggleSignalDetailsButton = document.getElementById("toggleSignalDetailsButton");
       const loadMoreSignalsButton = document.getElementById("loadMoreSignalsButton");
       const nearSearch = document.getElementById("nearSearch");
       const nearTypeFilter = document.getElementById("nearTypeFilter");
@@ -1452,6 +1484,9 @@
       let currentChartSymbol = "BTCUSDT";
       let currentChartTimeframe = "15m";
       let signalVisibleLimit = Number(signalLimitSelect.value);
+      let signalDetailsExpandedAll = false;
+      let expandedSignalIds = new Set();
+      let lastRenderedSignalIds = [];
       let tradingViewScriptPromise = null;
 
       function applyTheme(theme) {
@@ -1771,23 +1806,33 @@
         if (!signals.length) {
           signalResultNote.textContent = "";
           loadMoreSignalsButton.classList.add("hidden");
-          signalsEl.innerHTML = '<tr><td class="empty" colspan="10">No signals match your filters.</td></tr>';
+          lastRenderedSignalIds = [];
+          signalDetailsExpandedAll = false;
+          toggleSignalDetailsButton.textContent = "Expand all details";
+          signalsEl.innerHTML = '<tr><td class="empty" colspan="11">No signals match your filters.</td></tr>';
           return;
         }
 
         const visibleCount = Math.min(signalVisibleLimit, signals.length);
         const visibleSignals = signals.slice(0, visibleCount);
+        lastRenderedSignalIds = visibleSignals.map((signal) =>
+          String(signal.id || `${signal.symbol}:${signal.timeframe}:${signal.created_at}`)
+        );
         signalResultNote.textContent =
           signals.length > visibleCount
             ? `Showing latest ${visibleCount} of ${signals.length} matching signals`
             : `Showing ${signals.length} matching signal${signals.length === 1 ? "" : "s"}`;
         loadMoreSignalsButton.classList.toggle("hidden", visibleCount >= signals.length);
+        toggleSignalDetailsButton.textContent = signalDetailsExpandedAll ? "Collapse all details" : "Expand all details";
 
         signalsEl.innerHTML = visibleSignals
           .map((signal) => {
             const qualityScore = Number(signal.quality_score || 0);
             const qualityLabel = signal.quality_label || "Legacy";
             const newsContext = signal.news_context || {};
+            const signalId = String(signal.id || `${signal.symbol}:${signal.timeframe}:${signal.created_at}`);
+            const safeSignalId = escapeHtml(signalId);
+            const isExpanded = signalDetailsExpandedAll || expandedSignalIds.has(signalId);
             return `
               <tr>
                 <td>${coinCell(signal.symbol)}</td>
@@ -1803,11 +1848,16 @@
                 </td>
                 <td><span class="state-${newsRelationState(newsContext)}">${newsRelationText(newsContext)}</span></td>
                 <td class="muted">${formatTime(signal.created_at)}</td>
+                <td>
+                  <button class="link-button detail-toggle" type="button" data-signal-detail="${safeSignalId}" aria-expanded="${isExpanded}">
+                    ${isExpanded ? "Hide" : "Details"}
+                  </button>
+                </td>
                 <td>${chartButton(signal.symbol, signal.timeframe)}</td>
               </tr>
-              <tr>
+              <tr class="signal-detail-row ${isExpanded ? "" : "hidden"}">
                 <td></td>
-                <td colspan="9">
+                <td colspan="10">
                   <div class="detail-grid">
                     <div class="detail-block">
                       <span class="metric-label">Signal Quality</span>
@@ -2129,7 +2179,10 @@
         if (!currentSignals.length) {
           signalResultNote.textContent = "";
           loadMoreSignalsButton.classList.add("hidden");
-          signalsEl.innerHTML = '<tr><td class="empty" colspan="10">Waiting for signals...</td></tr>';
+          lastRenderedSignalIds = [];
+          signalDetailsExpandedAll = false;
+          toggleSignalDetailsButton.textContent = "Expand all details";
+          signalsEl.innerHTML = '<tr><td class="empty" colspan="11">Waiting for signals...</td></tr>';
           return;
         }
 
@@ -2278,7 +2331,7 @@
         if (signalsResult.status === "rejected") {
           signalResultNote.textContent = "";
           loadMoreSignalsButton.classList.add("hidden");
-          signalsEl.innerHTML = `<tr><td class="empty" colspan="10">Signal API unavailable: ${escapeHtml(
+          signalsEl.innerHTML = `<tr><td class="empty" colspan="11">Signal API unavailable: ${escapeHtml(
             signalsResult.reason?.message || "Unknown error"
           )}</td></tr>`;
         }
@@ -2326,6 +2379,22 @@
       }
 
       document.addEventListener("click", (event) => {
+        const detailButton = event.target.closest("[data-signal-detail]");
+        if (detailButton) {
+          const signalId = detailButton.dataset.signalDetail;
+          if (signalDetailsExpandedAll) {
+            expandedSignalIds = new Set(lastRenderedSignalIds);
+            signalDetailsExpandedAll = false;
+          }
+          if (expandedSignalIds.has(signalId)) {
+            expandedSignalIds.delete(signalId);
+          } else {
+            expandedSignalIds.add(signalId);
+          }
+          renderSignals();
+          return;
+        }
+
         const button = event.target.closest("[data-chart-symbol]");
         if (!button) return;
         setChart(button.dataset.chartSymbol, button.dataset.chartTimeframe);
@@ -2361,6 +2430,11 @@
       });
       signalLimitSelect.addEventListener("change", () => {
         resetSignalVisibleLimit();
+        renderSignals();
+      });
+      toggleSignalDetailsButton.addEventListener("click", () => {
+        signalDetailsExpandedAll = !signalDetailsExpandedAll;
+        expandedSignalIds.clear();
         renderSignals();
       });
       loadMoreSignalsButton.addEventListener("click", () => {
