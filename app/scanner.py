@@ -449,6 +449,9 @@ class FuturesScanner:
         close_time = latest["close_time"].to_pydatetime()
         signal_id = f"{symbol}:{timeframe}:{int(close_time.timestamp())}:{signal_type}"
         quality = self._signal_quality(signal_type, price, ema_9, ema_21, ema_200, rsi, volume_ratio)
+        trade_plan = self._trade_plan(signal_type, df, len(df) - 1)
+        backtest = self._signal_backtest(df, signal_type)
+        status = self._signal_status(signal_type, trade_plan, df, close_time)
         return Signal(
             id=signal_id,
             symbol=symbol,
@@ -470,9 +473,259 @@ class FuturesScanner:
             quality_score=quality["score"],
             quality_label=quality["label"],
             quality_reasons=quality["reasons"],
+            trade_plan=trade_plan,
+            backtest=backtest,
+            status=status,
             created_at=datetime.now(timezone.utc),
             tradingview_url=f"https://www.tradingview.com/chart/?symbol=BINANCE:{symbol}.P",
         )
+
+    def enrich_signal_context(self, signal: Signal) -> dict:
+        candles = self._candles.get((signal.symbol, signal.timeframe))
+        if candles is None or len(candles) < 30:
+            return {
+                "trade_plan": signal.trade_plan or {},
+                "backtest": signal.backtest or {},
+                "status": signal.status or {"state": "waiting", "label": "Waiting for market data"},
+            }
+
+        df = add_indicators(candles)
+        signal_time = self._signal_close_time(signal)
+        signal_index = self._signal_index(df, signal_time)
+        trade_plan = signal.trade_plan or self._trade_plan(signal.signal_type, df, signal_index)
+        backtest = signal.backtest or self._signal_backtest(df, signal.signal_type)
+        status = self._signal_status(signal.signal_type, trade_plan, df, signal_time)
+        return {"trade_plan": trade_plan, "backtest": backtest, "status": status}
+
+    def _trade_plan(self, signal_type: str, df: pd.DataFrame, index: int | None = None) -> dict:
+        if df.empty:
+            return {}
+
+        index = len(df) - 1 if index is None else max(0, min(index, len(df) - 1))
+        row = df.iloc[index]
+        entry = float(row["close"])
+        atr = self._atr(df, index)
+        lookback = df.iloc[max(0, index - 12) : index + 1]
+        if lookback.empty or entry <= 0:
+            return {}
+
+        buffer = max(atr * 0.25, entry * 0.0015)
+        if signal_type == "LONG":
+            structure_stop = float(lookback["low"].min()) - buffer
+            atr_stop = entry - atr * 1.4
+            stop_loss = min(structure_stop, atr_stop)
+            risk = entry - stop_loss
+            take_profit_1 = entry + risk * 1.5
+            take_profit_2 = entry + risk * 2.4
+            invalidation = "Close back below EMA21 or stop loss is touched"
+        else:
+            structure_stop = float(lookback["high"].max()) + buffer
+            atr_stop = entry + atr * 1.4
+            stop_loss = max(structure_stop, atr_stop)
+            risk = stop_loss - entry
+            take_profit_1 = entry - risk * 1.5
+            take_profit_2 = entry - risk * 2.4
+            invalidation = "Close back above EMA21 or stop loss is touched"
+
+        if risk <= 0:
+            risk = max(atr, entry * 0.005)
+            stop_loss = entry - risk if signal_type == "LONG" else entry + risk
+            take_profit_1 = entry + risk * 1.5 if signal_type == "LONG" else entry - risk * 1.5
+            take_profit_2 = entry + risk * 2.4 if signal_type == "LONG" else entry - risk * 2.4
+
+        risk_pct = risk / entry * 100 if entry > 0 else 0
+        zone_a = entry * 0.998
+        zone_b = entry * 1.002
+        return {
+            "entry": entry,
+            "entry_zone_low": min(zone_a, zone_b),
+            "entry_zone_high": max(zone_a, zone_b),
+            "stop_loss": stop_loss,
+            "take_profit_1": take_profit_1,
+            "take_profit_2": take_profit_2,
+            "risk_reward_1": 1.5,
+            "risk_reward_2": 2.4,
+            "risk_pct": risk_pct,
+            "atr_14": atr,
+            "invalidation": invalidation,
+            "note": "Position size should be based on stop distance, not on signal confidence.",
+        }
+
+    def _signal_backtest(self, df: pd.DataFrame, signal_type: str, lookahead: int = 12) -> dict:
+        if len(df) < 220:
+            return {"sample_size": 0, "summary": "Need at least 220 candles for local backtest"}
+
+        results = []
+        max_start = len(df) - lookahead - 1
+        for index in range(201, max_start + 1):
+            if not self._historical_signal_matches(df, index, signal_type):
+                continue
+            plan = self._trade_plan(signal_type, df, index)
+            if not plan:
+                continue
+            outcome = self._simulate_plan(signal_type, plan, df.iloc[index + 1 : index + 1 + lookahead])
+            results.append(outcome)
+
+        if not results:
+            return {
+                "sample_size": 0,
+                "lookahead_candles": lookahead,
+                "summary": "No similar setups found in current candle window",
+            }
+
+        wins = sum(1 for result in results if result["outcome"] == "tp1")
+        losses = sum(1 for result in results if result["outcome"] == "sl")
+        expired = len(results) - wins - losses
+        avg_move = sum(result["max_favorable_pct"] for result in results) / len(results)
+        avg_drawdown = sum(result["max_adverse_pct"] for result in results) / len(results)
+        return {
+            "sample_size": len(results),
+            "lookahead_candles": lookahead,
+            "tp1_hits": wins,
+            "stop_hits": losses,
+            "expired": expired,
+            "win_rate": wins / len(results) * 100,
+            "average_favorable_pct": avg_move,
+            "average_adverse_pct": avg_drawdown,
+            "summary": f"{wins}/{len(results)} hit TP1 before SL over the next {lookahead} candles",
+        }
+
+    def _signal_status(self, signal_type: str, plan: dict, df: pd.DataFrame, signal_time: datetime | None) -> dict:
+        if not plan or df.empty:
+            return {"state": "waiting", "label": "Waiting for plan"}
+
+        signal_index = self._signal_index(df, signal_time)
+        after = df.iloc[signal_index + 1 :]
+        if after.empty:
+            return {"state": "active", "label": "Active", "detail": "Waiting for the next closed candle"}
+
+        outcome = self._simulate_plan(signal_type, plan, after)
+        current = float(df.iloc[-1]["close"])
+        entry = float(plan.get("entry") or 0)
+        move_pct = self._directional_move_pct(signal_type, entry, current)
+        latest_time = df.iloc[-1]["close_time"].to_pydatetime().isoformat()
+
+        if outcome["outcome"] == "tp1":
+            return {
+                "state": "tp1",
+                "label": "TP1 hit",
+                "detail": "Price reached take profit 1 before stop loss",
+                "current_move_pct": move_pct,
+                "updated_at": latest_time,
+            }
+        if outcome["outcome"] == "sl":
+            return {
+                "state": "stopped",
+                "label": "Stopped",
+                "detail": "Price touched stop loss before TP1",
+                "current_move_pct": move_pct,
+                "updated_at": latest_time,
+            }
+        if len(after) >= 12:
+            return {
+                "state": "expired",
+                "label": "Expired",
+                "detail": "No TP1 or stop hit within 12 closed candles",
+                "current_move_pct": move_pct,
+                "updated_at": latest_time,
+            }
+        return {
+            "state": "active",
+            "label": "Active",
+            "detail": f"{len(after)} closed candle(s) since signal",
+            "current_move_pct": move_pct,
+            "updated_at": latest_time,
+        }
+
+    def _historical_signal_matches(self, df: pd.DataFrame, index: int, signal_type: str) -> bool:
+        latest = df.iloc[index]
+        previous = df.iloc[index - 1]
+        required = ["ema_9", "ema_21", "ema_200", "rsi_14", "volume_avg_20"]
+        if latest[required].isna().any() or previous[["ema_9", "ema_21"]].isna().any():
+            return False
+        price = float(latest["close"])
+        volume_average = float(latest["volume_avg_20"])
+        if volume_average <= 0 or float(latest["volume"]) <= volume_average:
+            return False
+        if signal_type == "LONG":
+            return (
+                price > float(latest["ema_200"])
+                and float(previous["ema_9"]) <= float(previous["ema_21"])
+                and float(latest["ema_9"]) > float(latest["ema_21"])
+                and float(latest["rsi_14"]) > 50
+            )
+        return (
+            price < float(latest["ema_200"])
+            and float(previous["ema_9"]) >= float(previous["ema_21"])
+            and float(latest["ema_9"]) < float(latest["ema_21"])
+            and float(latest["rsi_14"]) < 50
+        )
+
+    def _simulate_plan(self, signal_type: str, plan: dict, future: pd.DataFrame) -> dict:
+        entry = float(plan.get("entry") or 0)
+        stop = float(plan.get("stop_loss") or 0)
+        tp1 = float(plan.get("take_profit_1") or 0)
+        max_favorable_pct = 0.0
+        max_adverse_pct = 0.0
+        for _, row in future.iterrows():
+            high = float(row["high"])
+            low = float(row["low"])
+            if signal_type == "LONG":
+                max_favorable_pct = max(max_favorable_pct, self._directional_move_pct(signal_type, entry, high))
+                max_adverse_pct = min(max_adverse_pct, self._directional_move_pct(signal_type, entry, low))
+                if low <= stop:
+                    return {"outcome": "sl", "max_favorable_pct": max_favorable_pct, "max_adverse_pct": max_adverse_pct}
+                if high >= tp1:
+                    return {"outcome": "tp1", "max_favorable_pct": max_favorable_pct, "max_adverse_pct": max_adverse_pct}
+            else:
+                max_favorable_pct = max(max_favorable_pct, self._directional_move_pct(signal_type, entry, low))
+                max_adverse_pct = min(max_adverse_pct, self._directional_move_pct(signal_type, entry, high))
+                if high >= stop:
+                    return {"outcome": "sl", "max_favorable_pct": max_favorable_pct, "max_adverse_pct": max_adverse_pct}
+                if low <= tp1:
+                    return {"outcome": "tp1", "max_favorable_pct": max_favorable_pct, "max_adverse_pct": max_adverse_pct}
+        return {"outcome": "open", "max_favorable_pct": max_favorable_pct, "max_adverse_pct": max_adverse_pct}
+
+    def _atr(self, df: pd.DataFrame, index: int, period: int = 14) -> float:
+        start = max(1, index - period + 1)
+        window = df.iloc[start : index + 1]
+        previous_close = df["close"].shift(1).iloc[start : index + 1]
+        true_range = pd.concat(
+            [
+                window["high"] - window["low"],
+                (window["high"] - previous_close).abs(),
+                (window["low"] - previous_close).abs(),
+            ],
+            axis=1,
+        ).max(axis=1)
+        atr = float(true_range.mean()) if not true_range.empty else 0
+        price = float(df.iloc[index]["close"])
+        return atr if atr > 0 else price * 0.006
+
+    def _signal_close_time(self, signal: Signal) -> datetime | None:
+        parts = signal.id.split(":")
+        if len(parts) >= 3 and parts[2].isdigit():
+            return datetime.fromtimestamp(int(parts[2]), tz=timezone.utc)
+        return signal.created_at
+
+    @staticmethod
+    def _signal_index(df: pd.DataFrame, signal_time: datetime | None) -> int:
+        if signal_time is None:
+            return len(df) - 1
+        if signal_time.tzinfo is None:
+            signal_time = signal_time.replace(tzinfo=timezone.utc)
+        matches = df.index[df["close_time"] >= pd.Timestamp(signal_time)]
+        if len(matches):
+            return int(matches[0])
+        return len(df) - 1
+
+    @staticmethod
+    def _directional_move_pct(signal_type: str, entry: float, price: float) -> float:
+        if entry <= 0:
+            return 0.0
+        if signal_type == "LONG":
+            return (price - entry) / entry * 100
+        return (entry - price) / entry * 100
 
     def _signal_quality(
         self,

@@ -22,6 +22,9 @@ class Signal(BaseModel):
     quality_score: float | None = None
     quality_label: str | None = None
     quality_reasons: list[str] = Field(default_factory=list)
+    trade_plan: dict = Field(default_factory=dict)
+    backtest: dict = Field(default_factory=dict)
+    status: dict = Field(default_factory=dict)
     news_context: dict | None = None
     created_at: datetime
     tradingview_url: str

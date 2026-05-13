@@ -834,7 +834,7 @@
       .detail-grid {
         display: grid;
         gap: 10px;
-        grid-template-columns: minmax(220px, 0.9fr) minmax(260px, 1.1fr);
+        grid-template-columns: repeat(2, minmax(260px, 1fr));
       }
 
       .detail-block {
@@ -874,6 +874,14 @@
 
       .news-context strong {
         color: var(--text);
+      }
+
+      .status-detail {
+        color: var(--muted);
+        display: grid;
+        font-size: 13px;
+        gap: 7px;
+        line-height: 1.5;
       }
 
       .event-level {
@@ -1340,6 +1348,7 @@
                 <th>Volume Status</th>
                 <th>Quality</th>
                 <th>News</th>
+                <th>Status</th>
                 <th>Created Time</th>
                 <th>Details</th>
                 <th>Chart</th>
@@ -1347,7 +1356,7 @@
             </thead>
             <tbody id="signals">
               <tr>
-                <td class="empty" colspan="11">Waiting for signals...</td>
+                <td class="empty" colspan="12">Waiting for signals...</td>
               </tr>
             </tbody>
           </table>
@@ -1652,6 +1661,20 @@
         return `${sign}${number.toFixed(2)}%`;
       }
 
+      function formatPlanPrice(value) {
+        if (value === null || value === undefined || Number.isNaN(Number(value))) return "-";
+        return Number(value).toLocaleString(undefined, { maximumFractionDigits: 6 });
+      }
+
+      function signalStatusState(status) {
+        const state = status?.state;
+        if (state === "tp1") return "ok";
+        if (state === "stopped") return "error";
+        if (state === "expired") return "warn";
+        if (state === "active") return "ok";
+        return "muted";
+      }
+
       function riskLevelText(level) {
         if (level === "High") return "สูง";
         if (level === "Moderate") return "ปานกลาง";
@@ -1809,7 +1832,7 @@
           lastRenderedSignalIds = [];
           signalDetailsExpandedAll = false;
           toggleSignalDetailsButton.textContent = "Expand all details";
-          signalsEl.innerHTML = '<tr><td class="empty" colspan="11">No signals match your filters.</td></tr>';
+          signalsEl.innerHTML = '<tr><td class="empty" colspan="12">No signals match your filters.</td></tr>';
           return;
         }
 
@@ -1830,6 +1853,9 @@
             const qualityScore = Number(signal.quality_score || 0);
             const qualityLabel = signal.quality_label || "Legacy";
             const newsContext = signal.news_context || {};
+            const tradePlan = signal.trade_plan || {};
+            const backtest = signal.backtest || {};
+            const signalStatus = signal.status || {};
             const signalId = String(signal.id || `${signal.symbol}:${signal.timeframe}:${signal.created_at}`);
             const safeSignalId = escapeHtml(signalId);
             const isExpanded = signalDetailsExpandedAll || expandedSignalIds.has(signalId);
@@ -1847,6 +1873,7 @@
                   </span>
                 </td>
                 <td><span class="state-${newsRelationState(newsContext)}">${newsRelationText(newsContext)}</span></td>
+                <td><span class="state-${signalStatusState(signalStatus)}">${escapeHtml(signalStatus.label || "Waiting")}</span></td>
                 <td class="muted">${formatTime(signal.created_at)}</td>
                 <td>
                   <button class="link-button detail-toggle" type="button" data-signal-detail="${safeSignalId}" aria-expanded="${isExpanded}">
@@ -1857,12 +1884,39 @@
               </tr>
               <tr class="signal-detail-row ${isExpanded ? "" : "hidden"}">
                 <td></td>
-                <td colspan="10">
+                <td colspan="11">
                   <div class="detail-grid">
                     <div class="detail-block">
                       <span class="metric-label">Signal Quality</span>
                       <div class="detail-list">
                         ${(signal.quality_reasons || signal.reasons || []).map((reason) => `<div>${escapeHtml(reason)}</div>`).join("")}
+                      </div>
+                    </div>
+                    <div class="detail-block">
+                      <span class="metric-label">Trade Plan</span>
+                      <div class="detail-list">
+                        <div>Entry zone ${formatPlanPrice(tradePlan.entry_zone_low)} - ${formatPlanPrice(tradePlan.entry_zone_high)}</div>
+                        <div>Stop loss ${formatPlanPrice(tradePlan.stop_loss)} (${formatPercent(-(tradePlan.risk_pct || 0))} risk)</div>
+                        <div>TP1 ${formatPlanPrice(tradePlan.take_profit_1)} at R:R ${Number(tradePlan.risk_reward_1 || 0).toFixed(1)}</div>
+                        <div>TP2 ${formatPlanPrice(tradePlan.take_profit_2)} at R:R ${Number(tradePlan.risk_reward_2 || 0).toFixed(1)}</div>
+                        <div>${escapeHtml(tradePlan.invalidation || "Wait for a valid plan from market data")}</div>
+                      </div>
+                    </div>
+                    <div class="detail-block">
+                      <span class="metric-label">Backtest Snapshot</span>
+                      <div class="detail-list">
+                        <div>${escapeHtml(backtest.summary || "Waiting for enough similar setups")}</div>
+                        <div>Samples ${Number(backtest.sample_size || 0).toFixed(0)} | Win rate ${formatPercent(backtest.win_rate || 0)}</div>
+                        <div>Avg favorable ${formatPercent(backtest.average_favorable_pct || 0)} | Avg adverse ${formatPercent(backtest.average_adverse_pct || 0)}</div>
+                        <div>TP1 ${Number(backtest.tp1_hits || 0).toFixed(0)} | SL ${Number(backtest.stop_hits || 0).toFixed(0)} | Expired ${Number(backtest.expired || 0).toFixed(0)}</div>
+                      </div>
+                    </div>
+                    <div class="detail-block">
+                      <span class="metric-label">Signal Status</span>
+                      <div class="status-detail">
+                        <div><span class="state-${signalStatusState(signalStatus)}">${escapeHtml(signalStatus.label || "Waiting")}</span></div>
+                        <div>${escapeHtml(signalStatus.detail || "Waiting for tracking data")}</div>
+                        <div>Current move ${formatPercent(signalStatus.current_move_pct || 0)}</div>
                       </div>
                     </div>
                     <div class="detail-block">
@@ -2182,7 +2236,7 @@
           lastRenderedSignalIds = [];
           signalDetailsExpandedAll = false;
           toggleSignalDetailsButton.textContent = "Expand all details";
-          signalsEl.innerHTML = '<tr><td class="empty" colspan="11">Waiting for signals...</td></tr>';
+          signalsEl.innerHTML = '<tr><td class="empty" colspan="12">Waiting for signals...</td></tr>';
           return;
         }
 
@@ -2331,7 +2385,7 @@
         if (signalsResult.status === "rejected") {
           signalResultNote.textContent = "";
           loadMoreSignalsButton.classList.add("hidden");
-          signalsEl.innerHTML = `<tr><td class="empty" colspan="11">Signal API unavailable: ${escapeHtml(
+          signalsEl.innerHTML = `<tr><td class="empty" colspan="12">Signal API unavailable: ${escapeHtml(
             signalsResult.reason?.message || "Unknown error"
           )}</td></tr>`;
         }

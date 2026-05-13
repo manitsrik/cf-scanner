@@ -164,6 +164,7 @@ def _with_news_context(signal: Signal, news_payload: dict) -> Signal:
             "trade_note": "ใช้ technical signal เป็นหลัก และตรวจข่าวก่อนเข้าไม้จริง",
         }
     update = {"news_context": selected}
+    update.update(scanner.enrich_signal_context(signal))
     if signal.quality_score is None:
         update.update(_legacy_quality(signal))
     return signal.model_copy(update=update)
