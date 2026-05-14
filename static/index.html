@@ -264,6 +264,11 @@
         grid-template-columns: minmax(180px, 230px) minmax(0, 1fr);
       }
 
+      .gauge-meter {
+        padding: 14px 10px 0;
+        position: relative;
+      }
+
       .gauge-visual {
         aspect-ratio: 2 / 1;
         background:
@@ -314,18 +319,19 @@
         color: var(--muted);
         font-size: 10px;
         font-weight: 800;
-        height: 14px;
+        inset: 0 10px 0;
         line-height: 1;
-        margin-top: 6px;
-        position: relative;
+        pointer-events: none;
+        position: absolute;
       }
 
       .gauge-scale span {
-        left: var(--scale-pos);
+        left: var(--scale-left);
         position: absolute;
         text-align: center;
-        top: 0;
+        top: var(--scale-top);
         transform: translateX(-50%);
+        white-space: nowrap;
       }
 
       .gauge-scale span:first-child {
@@ -337,23 +343,24 @@
       }
 
       .gauge-scale span::before {
-        background: var(--border);
+        background: currentColor;
         border-radius: 999px;
         content: "";
-        height: 6px;
+        height: 5px;
         left: 50%;
         position: absolute;
-        top: -9px;
+        opacity: 0.65;
+        top: 13px;
         transform: translateX(-50%);
         width: 2px;
       }
 
       .gauge-scale span:first-child::before {
-        left: 2px;
+        left: 3px;
       }
 
       .gauge-scale span:last-child::before {
-        left: calc(100% - 2px);
+        left: calc(100% - 3px);
       }
 
       .gauge-labels {
@@ -1316,16 +1323,18 @@
         <div class="market-overview" aria-label="Market overview">
           <div class="bias-gauge">
             <div>
-              <div class="gauge-visual" aria-hidden="true">
-                <div class="gauge-needle" id="marketBiasNeedle"></div>
-                <div class="gauge-center"></div>
-              </div>
-              <div class="gauge-scale" aria-hidden="true">
-                <span style="--scale-pos: 0%">0</span>
-                <span style="--scale-pos: 35%">35</span>
-                <span style="--scale-pos: 50%">50</span>
-                <span style="--scale-pos: 65%">65</span>
-                <span style="--scale-pos: 100%">100</span>
+              <div class="gauge-meter" aria-hidden="true">
+                <div class="gauge-visual">
+                  <div class="gauge-needle" id="marketBiasNeedle"></div>
+                  <div class="gauge-center"></div>
+                </div>
+                <div class="gauge-scale">
+                  <span style="--scale-left: 0%; --scale-top: 72%">0</span>
+                  <span style="--scale-left: 25%; --scale-top: 16%">35</span>
+                  <span style="--scale-left: 50%; --scale-top: 0%">50</span>
+                  <span style="--scale-left: 75%; --scale-top: 16%">65</span>
+                  <span style="--scale-left: 100%; --scale-top: 72%">100</span>
+                </div>
               </div>
               <div class="gauge-labels">
                 <span>Short</span>
