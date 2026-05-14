@@ -344,24 +344,6 @@
         transform: translateX(10%);
       }
 
-      .gauge-scale span::before {
-        background: currentColor;
-        border-radius: 999px;
-        content: "";
-        height: 8px;
-        left: 50%;
-        position: absolute;
-        opacity: 0.6;
-        top: 16px;
-        transform: translateX(-50%);
-        width: 2px;
-      }
-
-      .gauge-scale span:first-child::before,
-      .gauge-scale span:last-child::before {
-        top: -10px;
-      }
-
       .gauge-labels {
         color: var(--muted);
         display: flex;
@@ -1329,9 +1311,8 @@
                 </div>
                 <div class="gauge-scale">
                   <span style="--scale-left: 0%; --scale-top: 83%">0%</span>
-                  <span style="--scale-left: 14%; --scale-top: 24%">25%</span>
-                  <span style="--scale-left: 50%; --scale-top: 0">50%</span>
-                  <span style="--scale-left: 86%; --scale-top: 24%">75%</span>
+                  <span style="--scale-left: 27%; --scale-top: 14%">35%</span>
+                  <span style="--scale-left: 73%; --scale-top: 14%">65%</span>
                   <span style="--scale-left: 100%; --scale-top: 83%">100%</span>
                 </div>
               </div>
