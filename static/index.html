@@ -373,11 +373,36 @@
       }
 
       .mover-list {
+        background: var(--surface-muted);
+        border: 1px solid var(--border-soft);
+        border-radius: 7px;
         display: grid;
-        gap: 6px;
-        max-height: 190px;
+        gap: 2px;
+        max-height: 236px;
         overflow: auto;
-        padding-right: 2px;
+        padding: 6px;
+        scrollbar-gutter: stable;
+      }
+
+      .mover-head,
+      .mover-row {
+        align-items: center;
+        display: grid;
+        gap: 8px;
+        grid-template-columns: 28px minmax(92px, 0.7fr) minmax(100px, 1fr) 76px;
+      }
+
+      .mover-head {
+        background: var(--surface-muted);
+        color: var(--muted);
+        font-size: 9px;
+        font-weight: 850;
+        letter-spacing: 0.05em;
+        padding: 2px 8px 5px;
+        position: sticky;
+        text-transform: uppercase;
+        top: 0;
+        z-index: 1;
       }
 
       .news-impact {
@@ -502,23 +527,59 @@
       }
 
       .mover-row {
-        align-items: center;
-        display: grid;
-        gap: 8px;
-        grid-template-columns: 84px minmax(90px, 1fr) 66px;
+        background: var(--surface);
+        border: 1px solid transparent;
+        border-radius: 6px;
+        min-height: 34px;
+        padding: 5px 8px;
       }
 
-      .mover-symbol {
+      .mover-row:nth-child(even) {
+        background: color-mix(in srgb, var(--surface) 70%, var(--surface-muted));
+      }
+
+      .mover-row:hover {
+        border-color: var(--primary-border);
+      }
+
+      .mover-rank {
+        color: var(--muted);
+        font-size: 11px;
+        font-weight: 800;
+        text-align: right;
+      }
+
+      .mover-symbol,
+      .mover-base {
         font-size: 13px;
         font-weight: 850;
         min-width: 0;
+      }
+
+      .mover-symbol {
+        align-items: baseline;
+        display: flex;
+        gap: 3px;
+        overflow: hidden;
+      }
+
+      .mover-base {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .mover-quote {
+        color: var(--muted);
+        font-size: 10px;
+        font-weight: 800;
       }
 
       .mover-track {
         background: var(--surface-muted);
         border: 1px solid var(--border-soft);
         border-radius: 999px;
-        height: 12px;
+        height: 10px;
         overflow: hidden;
       }
 
@@ -539,6 +600,8 @@
       .mover-change {
         font-size: 13px;
         font-weight: 850;
+        justify-self: end;
+        min-width: 70px;
         text-align: right;
       }
 
@@ -1050,8 +1113,9 @@
           font-size: 22px;
         }
 
+        .mover-head,
         .mover-row {
-          grid-template-columns: 82px minmax(90px, 1fr) 68px;
+          grid-template-columns: 24px minmax(78px, 0.8fr) minmax(80px, 1fr) 72px;
         }
 
         .setup-row {
@@ -2095,22 +2159,37 @@
         marketCountsEl.textContent = `${overview.gainers || 0} / ${overview.losers || 0}`;
 
         const maxMove = Math.max(...movers.map((item) => Math.abs(Number(item.change_pct || 0))), 0.01);
-        marketMoversEl.innerHTML = movers
-          .map((item) => {
+        marketMoversEl.innerHTML = `
+          <div class="mover-head" aria-hidden="true">
+            <span>#</span>
+            <span>Symbol</span>
+            <span>24h Move</span>
+            <span>Change</span>
+          </div>
+          ${movers
+            .map((item, index) => {
             const change = Number(item.change_pct || 0);
             const direction = change >= 0 ? "up" : "down";
             const width = Math.max(3, Math.abs(change) / maxMove * 100);
+            const rawSymbol = String(item.symbol || "");
+            const symbolBase = rawSymbol.endsWith("USDT") ? rawSymbol.slice(0, -4) : rawSymbol;
+            const symbolQuote = rawSymbol.endsWith("USDT") ? "USDT" : "";
             return `
               <div class="mover-row">
-                <span class="mover-symbol">${escapeHtml(item.symbol)}</span>
+                <span class="mover-rank">${index + 1}</span>
+                <span class="mover-symbol" title="${escapeHtml(rawSymbol)}">
+                  <span class="mover-base">${escapeHtml(symbolBase)}</span>
+                  <span class="mover-quote">${escapeHtml(symbolQuote)}</span>
+                </span>
                 <div class="mover-track" title="${escapeHtml(item.symbol)} ${formatPercent(change)}">
                   <div class="mover-fill ${direction}" style="width: ${width}%"></div>
                 </div>
                 <span class="mover-change ${change >= 0 ? "state-ok" : "state-error"}">${formatPercent(change)}</span>
               </div>
             `;
-          })
-          .join("");
+            })
+            .join("")}
+        `;
 
         const risk = overview.risk || {};
         const riskState = risk.level === "High" ? "error" : risk.level === "Moderate" ? "warn" : "ok";
