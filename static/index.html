@@ -384,12 +384,34 @@
         scrollbar-gutter: stable;
       }
 
+      .mover-list.expanded {
+        max-height: 520px;
+      }
+
+      .mover-list-wrap {
+        display: grid;
+        gap: 6px;
+      }
+
+      .mover-list-head {
+        align-items: center;
+        display: flex;
+        gap: 10px;
+        justify-content: space-between;
+      }
+
+      .mover-toggle {
+        font-size: 12px;
+        min-height: 28px;
+        padding: 0 10px;
+      }
+
       .mover-head,
       .mover-row {
         align-items: center;
         display: grid;
         gap: 8px;
-        grid-template-columns: 28px minmax(92px, 0.7fr) minmax(100px, 1fr) 76px;
+        grid-template-columns: 28px minmax(112px, 0.8fr) minmax(100px, 1fr) 76px;
       }
 
       .mover-head {
@@ -549,30 +571,13 @@
         text-align: right;
       }
 
-      .mover-symbol,
-      .mover-base {
+      .mover-symbol {
         font-size: 13px;
         font-weight: 850;
         min-width: 0;
-      }
-
-      .mover-symbol {
-        align-items: baseline;
-        display: flex;
-        gap: 3px;
-        overflow: hidden;
-      }
-
-      .mover-base {
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
-      }
-
-      .mover-quote {
-        color: var(--muted);
-        font-size: 10px;
-        font-weight: 800;
       }
 
       .mover-track {
@@ -1115,7 +1120,7 @@
 
         .mover-head,
         .mover-row {
-          grid-template-columns: 24px minmax(78px, 0.8fr) minmax(80px, 1fr) 72px;
+          grid-template-columns: 24px minmax(92px, 0.85fr) minmax(80px, 1fr) 72px;
         }
 
         .setup-row {
@@ -1319,8 +1324,14 @@
               <div class="muted">Waiting for news...</div>
             </div>
           </div>
-          <div class="mover-list" id="marketMovers">
-            <div class="muted">Loading market overview...</div>
+          <div class="mover-list-wrap" aria-label="Market movers">
+            <div class="mover-list-head">
+              <span class="metric-label">Market Movers</span>
+              <button class="secondary mover-toggle" id="moversExpandButton" type="button">Expand</button>
+            </div>
+            <div class="mover-list" id="marketMovers">
+              <div class="muted">Loading market overview...</div>
+            </div>
           </div>
           <div class="decision-grid">
             <div class="decision-panel">
@@ -1530,6 +1541,7 @@
       const newsImpactSummaryEl = document.getElementById("newsImpactSummary");
       const newsImpactListEl = document.getElementById("newsImpactList");
       const newsExpandButton = document.getElementById("newsExpandButton");
+      const moversExpandButton = document.getElementById("moversExpandButton");
       const bestSetupsEl = document.getElementById("bestSetups");
       const riskLevelEl = document.getElementById("riskLevel");
       const riskFlagsEl = document.getElementById("riskFlags");
@@ -1567,6 +1579,7 @@
       let currentPairs = [];
       let currentNews = null;
       let newsImpactExpanded = false;
+      let moversExpanded = false;
       let currentChartSymbol = "BTCUSDT";
       let currentChartTimeframe = "15m";
       let signalVisibleLimit = Number(signalLimitSelect.value);
@@ -2134,6 +2147,7 @@
           marketBreadthFillEl.style.width = "0%";
           marketCountsEl.textContent = "Loading";
           marketMoversEl.innerHTML = '<div class="muted">Waiting for market candles...</div>';
+          moversExpandButton.disabled = true;
           thaiMarketBriefEl.innerHTML = '<span class="metric-label">Thai Market Brief</span><div class="brief-line">กำลังสรุปภาพรวมตลาด...</div>';
           riskLevelEl.textContent = "กำลังโหลด";
           riskFlagsEl.innerHTML = '<div class="muted">กำลังรอตรวจความเสี่ยง...</div>';
@@ -2157,6 +2171,9 @@
         marketBreadthEl.textContent = `${breadth.toFixed(0)}% up`;
         marketBreadthFillEl.style.width = `${breadth}%`;
         marketCountsEl.textContent = `${overview.gainers || 0} / ${overview.losers || 0}`;
+        marketMoversEl.classList.toggle("expanded", moversExpanded);
+        moversExpandButton.textContent = moversExpanded ? "Collapse" : "Expand";
+        moversExpandButton.disabled = movers.length <= 5;
 
         const maxMove = Math.max(...movers.map((item) => Math.abs(Number(item.change_pct || 0))), 0.01);
         marketMoversEl.innerHTML = `
@@ -2172,15 +2189,10 @@
             const direction = change >= 0 ? "up" : "down";
             const width = Math.max(3, Math.abs(change) / maxMove * 100);
             const rawSymbol = String(item.symbol || "");
-            const symbolBase = rawSymbol.endsWith("USDT") ? rawSymbol.slice(0, -4) : rawSymbol;
-            const symbolQuote = rawSymbol.endsWith("USDT") ? "USDT" : "";
             return `
               <div class="mover-row">
                 <span class="mover-rank">${index + 1}</span>
-                <span class="mover-symbol" title="${escapeHtml(rawSymbol)}">
-                  <span class="mover-base">${escapeHtml(symbolBase)}</span>
-                  <span class="mover-quote">${escapeHtml(symbolQuote)}</span>
-                </span>
+                <span class="mover-symbol" title="${escapeHtml(rawSymbol)}">${escapeHtml(rawSymbol)}</span>
                 <div class="mover-track" title="${escapeHtml(item.symbol)} ${formatPercent(change)}">
                   <div class="mover-fill ${direction}" style="width: ${width}%"></div>
                 </div>
@@ -2560,6 +2572,11 @@
       newsExpandButton.addEventListener("click", () => {
         newsImpactExpanded = !newsImpactExpanded;
         renderNewsImpact(currentNews);
+      });
+      moversExpandButton.addEventListener("click", () => {
+        moversExpanded = !moversExpanded;
+        marketMoversEl.classList.toggle("expanded", moversExpanded);
+        moversExpandButton.textContent = moversExpanded ? "Collapse" : "Expand";
       });
       chart15m.addEventListener("click", () => setChart(currentChartSymbol, "15m"));
       chart30m.addEventListener("click", () => setChart(currentChartSymbol, "30m"));
