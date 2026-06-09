@@ -3,9 +3,30 @@ from hashlib import sha256
 import os
 from pathlib import Path
 import secrets
+from typing import Any
 
 from pydantic import Field
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, DotEnvSettingsSource, EnvSettingsSource, SettingsConfigDict
+
+
+class _CommaSeparatedListMixin:
+    comma_separated_fields = {"symbols", "timeframes"}
+
+    def prepare_field_value(self, field_name: str, field: Any, value: Any, value_is_complex: bool) -> Any:
+        if field_name in self.comma_separated_fields and isinstance(value, str):
+            raw_value = value.strip()
+            if raw_value and not raw_value.startswith("["):
+                return [item.strip() for item in raw_value.split(",") if item.strip()]
+
+        return super().prepare_field_value(field_name, field, value, value_is_complex)
+
+
+class CommaSeparatedEnvSettingsSource(_CommaSeparatedListMixin, EnvSettingsSource):
+    pass
+
+
+class CommaSeparatedDotEnvSettingsSource(_CommaSeparatedListMixin, DotEnvSettingsSource):
+    pass
 
 
 class Settings(BaseSettings):
@@ -13,7 +34,7 @@ class Settings(BaseSettings):
 
     app_name: str = "CF Scanner"
     symbols: list[str] = Field(default_factory=lambda: ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT"])
-    timeframes: list[str] = Field(default_factory=lambda: ["15m", "30m", "1h"])
+    timeframes: list[str] = Field(default_factory=lambda: ["5m", "15m", "30m", "1h"])
     auto_watchlist_enabled: bool = True
     auto_watchlist_size: int = 20
     watchlist_refresh_seconds: int = 3600
@@ -38,6 +59,26 @@ class Settings(BaseSettings):
     session_secret: str | None = None
     session_cookie_name: str = "cf_scanner_session"
     session_cookie_secure: bool = True
+
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls: type[BaseSettings],
+        init_settings,
+        env_settings,
+        dotenv_settings,
+        file_secret_settings,
+    ):
+        return (
+            init_settings,
+            CommaSeparatedEnvSettingsSource(settings_cls),
+            CommaSeparatedDotEnvSettingsSource(
+                settings_cls,
+                env_file=settings_cls.model_config.get("env_file"),
+                env_file_encoding=settings_cls.model_config.get("env_file_encoding"),
+            ),
+            file_secret_settings,
+        )
 
     def model_post_init(self, __context: object) -> None:
         if self.railway_volume_mount_path and "SIGNAL_DB_PATH" not in os.environ:

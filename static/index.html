@@ -1222,8 +1222,9 @@
             </div>
             <div class="chart-panel">
               <div class="chart-toolbar">
-                <div class="chart-title" id="chartTitle">BTCUSDT 15m</div>
+                <div class="chart-title" id="chartTitle">BTCUSDT 5m</div>
                 <div class="chart-actions">
+                  <button class="secondary" id="chart5m" type="button">5m</button>
                   <button class="secondary" id="chart15m" type="button">15m</button>
                   <button class="secondary" id="chart30m" type="button">30m</button>
                   <button class="secondary" id="chart1h" type="button">1h</button>
@@ -1404,6 +1405,7 @@
           </select>
           <select id="nearTimeframeFilter">
             <option value="all">All timeframes</option>
+            <option value="5m">5m</option>
             <option value="15m">15m</option>
             <option value="30m">30m</option>
             <option value="1h">1h</option>
@@ -1446,6 +1448,7 @@
           </select>
           <select id="signalTimeframeFilter">
             <option value="all">All timeframes</option>
+            <option value="5m">5m</option>
             <option value="15m">15m</option>
             <option value="30m">30m</option>
             <option value="1h">1h</option>
@@ -1505,6 +1508,7 @@
           <input id="watchlistSearch" type="search" placeholder="Search watchlist symbol..." />
           <select id="watchlistTimeframeFilter">
             <option value="all">All timeframes</option>
+            <option value="5m">5m</option>
             <option value="15m">15m</option>
             <option value="30m">30m</option>
             <option value="1h">1h</option>
@@ -1611,6 +1615,7 @@
       const chartTitle = document.getElementById("chartTitle");
       const chartFrame = document.getElementById("chartFrame");
       const chartOpenLink = document.getElementById("chartOpenLink");
+      const chart5m = document.getElementById("chart5m");
       const chart15m = document.getElementById("chart15m");
       const chart30m = document.getElementById("chart30m");
       const chart1h = document.getElementById("chart1h");
@@ -1623,7 +1628,7 @@
       let newsImpactExpanded = false;
       let moversExpanded = false;
       let currentChartSymbol = "BTCUSDT";
-      let currentChartTimeframe = "15m";
+      let currentChartTimeframe = "5m";
       let signalVisibleLimit = Number(signalLimitSelect.value);
       let signalDetailsExpandedAll = false;
       let expandedSignalIds = new Set();
@@ -2620,6 +2625,7 @@
         marketMoversEl.classList.toggle("expanded", moversExpanded);
         moversExpandButton.textContent = moversExpanded ? "Collapse" : "Expand";
       });
+      chart5m.addEventListener("click", () => setChart(currentChartSymbol, "5m"));
       chart15m.addEventListener("click", () => setChart(currentChartSymbol, "15m"));
       chart30m.addEventListener("click", () => setChart(currentChartSymbol, "30m"));
       chart1h.addEventListener("click", () => setChart(currentChartSymbol, "1h"));
