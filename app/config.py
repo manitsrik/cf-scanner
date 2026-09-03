@@ -43,9 +43,11 @@ class Settings(BaseSettings):
     rest_backoff_seconds: int = 7200
     news_refresh_seconds: int = 600
     news_item_limit: int = 12
-    kline_limit: int = 250
+    overview_timeframe: str = "15m"
+    kline_limit: int = 320
     binance_rest_url: str = "https://fapi.binance.com"
     binance_ws_url: str = "wss://fstream.binance.com/market/stream"
+    dashboard_url: str = "https://cf-scanner-production.up.railway.app/"
     telegram_bot_token: str | None = None
     telegram_chat_id: str | None = None
     signal_db_path: str = "data/signals.db"

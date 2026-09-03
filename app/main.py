@@ -6,12 +6,12 @@ from contextlib import asynccontextmanager
 from fastapi import Depends, FastAPI, Form, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, RedirectResponse
-from fastapi.staticfiles import StaticFiles
 
 from app.auth import ApiAuth, create_session_token, redirect_to_dashboard, require_page_auth, verify_password
 from app.config import get_settings
 from app.models import Signal, SymbolInfo
 from app.news import CryptoNewsService
+from app.quality import signal_quality, trader_summary
 from app.scanner import FuturesScanner
 from app.store import SignalStore
 from app.telegram import TelegramAlerter
@@ -20,7 +20,11 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 
 settings = get_settings()
 store = SignalStore(limit=settings.signal_limit, db_path=settings.signal_db_path)
-alerter = TelegramAlerter(settings.telegram_bot_token, settings.telegram_chat_id)
+alerter = TelegramAlerter(
+    settings.telegram_bot_token,
+    settings.telegram_chat_id,
+    dashboard_url=settings.dashboard_url,
+)
 scanner = FuturesScanner(settings=settings, store=store, alerter=alerter)
 news_service = CryptoNewsService(
     refresh_seconds=settings.news_refresh_seconds,
@@ -51,7 +55,8 @@ app.add_middleware(
     allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
-app.mount("/static", StaticFiles(directory="static"), name="static")
+# The dashboard and login pages are served through the routes below so that page
+# auth cannot be bypassed by requesting the HTML file directly.
 
 
 def no_store_file_response(path: str) -> FileResponse:
@@ -106,6 +111,7 @@ async def health() -> dict:
     return {
         "status": "ok" if healthy else "warning",
         "running": scanner_status["running"],
+        "loop_states": scanner_status["loop_states"],
         "market_data_status": scanner_status["market_data_status"],
         "websocket_connected": scanner_status["websocket_connected"],
         "loaded_pair_count": scanner_status["loaded_pair_count"],
@@ -167,7 +173,7 @@ def _with_news_context(signal: Signal, news_payload: dict) -> Signal:
     update.update(scanner.enrich_signal_context(signal))
     if signal.quality_score is None:
         update.update(_legacy_quality(signal))
-    update["trader_summary"] = scanner._trader_summary(
+    update["trader_summary"] = trader_summary(
         signal_type=signal.signal_type,
         quality_label=update.get("quality_label") or signal.quality_label,
         quality_score=update.get("quality_score") or signal.quality_score,
@@ -182,60 +188,22 @@ def _with_news_context(signal: Signal, news_payload: dict) -> Signal:
 
 
 def _legacy_quality(signal: Signal) -> dict:
+    """Score signals saved before quality fields existed, using the shared formula."""
     indicators = signal.indicators or {}
-    price = float(signal.price or 0)
-    ema_9 = float(indicators.get("ema_9") or 0)
-    ema_21 = float(indicators.get("ema_21") or 0)
-    ema_200 = float(indicators.get("ema_200") or 0)
-    rsi = float(indicators.get("rsi_14") or signal.rsi or 0)
-    volume_ratio = float(indicators.get("volume_ratio") or 0)
-    trend_distance_pct = abs(price - ema_200) / price * 100 if price > 0 and ema_200 > 0 else 0
-    cross_gap_pct = abs(ema_9 - ema_21) / price * 100 if price > 0 and ema_9 > 0 and ema_21 > 0 else 0
-    trend_score = _clamp(trend_distance_pct / 1.2 * 100, 35, 100)
-    cross_score = _clamp(cross_gap_pct / 0.35 * 100, 35, 100)
-    volume_score = _clamp(volume_ratio / 1.8 * 100, 35, 100)
-    rsi_score = _rsi_quality_score(signal.signal_type, rsi)
-    score = _clamp(trend_score * 0.28 + cross_score * 0.2 + rsi_score * 0.24 + volume_score * 0.28, 0, 100)
-    if score >= 85:
-        label = "Excellent"
-    elif score >= 70:
-        label = "Strong"
-    elif score >= 55:
-        label = "Caution"
-    else:
-        label = "Weak"
+    quality = signal_quality(
+        signal.signal_type,
+        float(signal.price or 0),
+        float(indicators.get("ema_9") or 0),
+        float(indicators.get("ema_21") or 0),
+        float(indicators.get("ema_200") or 0),
+        float(indicators.get("rsi_14") or signal.rsi or 0),
+        float(indicators.get("volume_ratio") or 0),
+    )
     return {
-        "quality_score": score,
-        "quality_label": label,
-        "quality_reasons": [
-            f"Trend distance {trend_distance_pct:.2f}% from EMA200",
-            f"EMA cross gap {cross_gap_pct:.3f}%",
-            f"RSI quality {rsi_score:.0f}/100",
-            f"Volume strength {volume_ratio:.2f}x avg20",
-        ],
+        "quality_score": quality["score"],
+        "quality_label": quality["label"],
+        "quality_reasons": quality["reasons"],
     }
-
-
-def _rsi_quality_score(side: str, rsi: float) -> float:
-    if side == "LONG":
-        if 50 <= rsi <= 68:
-            return 100
-        if 45 <= rsi < 50:
-            return 70
-        if 68 < rsi <= 75:
-            return 65
-        return 35
-    if 32 <= rsi <= 50:
-        return 100
-    if 50 < rsi <= 55:
-        return 70
-    if 25 <= rsi < 32:
-        return 65
-    return 35
-
-
-def _clamp(value: float, minimum: float, maximum: float) -> float:
-    return max(minimum, min(maximum, value))
 
 
 @app.get("/symbols", response_model=SymbolInfo)

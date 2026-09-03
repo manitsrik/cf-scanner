@@ -18,6 +18,7 @@ This app does not place trades, does not use private Binance API keys, and does 
 - Signal reason details, dashboard filters, time range filters, and load-more controls
 - Signal cooldown and near-setup monitoring
 - Runtime health metrics for market data freshness
+- Supervised background loops: a crashed REST or websocket loop restarts itself and is reported by `/health` and `/status`
 - Color status badges, system event log, and Telegram system alerts
 - Market Overview gauge, risk panel, top movers, and opportunity-ranked best setups
 - Thai Market Brief summary generated from the current market overview, risk checks, and best setups
@@ -73,6 +74,7 @@ REST_CONCURRENCY=1
 REST_BACKOFF_SECONDS=7200
 NEWS_REFRESH_SECONDS=600
 NEWS_ITEM_LIMIT=12
+OVERVIEW_TIMEFRAME=15m
 BINANCE_WS_URL=wss://fstream.binance.com/market/stream
 SIGNAL_COOLDOWN_MINUTES=120
 SYSTEM_ALERT_COOLDOWN_MINUTES=30
@@ -81,6 +83,7 @@ NEAR_VOLUME_RATIO_MIN=0.8
 DASHBOARD_PASSWORD=choose_a_private_password
 SESSION_SECRET=change_me_to_a_long_random_string
 SESSION_COOKIE_SECURE=true
+DASHBOARD_URL=https://your-app-url/
 ```
 
 Run locally:
@@ -107,9 +110,9 @@ http://localhost:8000
 
 `/status` shows scanner runtime state, websocket state, Telegram status, market-data freshness, stale pair counts, latest system events, and latest closed candle time for every configured symbol/timeframe.
 
-`/health` stays public for uptime checks and returns a compact health summary with running state, market-data status, websocket state, loaded pair counts, stale pair counts, and the latest error.
+`/health` stays public for uptime checks and returns a compact health summary with running state, per-loop state, market-data status, websocket state, loaded pair counts, stale pair counts, and the latest error. `running` is true only while both background loops (REST refresh and websocket) are actually alive, so a crashed loop shows up as `warning` instead of a silent failure.
 
-`/indicators?symbol=BTCUSDT&timeframe=15m` returns recent RSI and MACD series used by the compact dashboard indicator panels.
+`/indicators?symbol=BTCUSDT&timeframe=15m` returns recent RSI and MACD series for one pair. The bundled dashboard does not call it; it exists for external tools and manual checks, as does `/symbols`.
 
 `/news` returns recent RSS news matched to the active watchlist, including simple impact, sentiment, and Thai summary text for dashboard context.
 
@@ -135,7 +138,7 @@ By default the scanner builds an automatic watchlist from Binance USDT perpetual
 
 The dashboard separates market context from trade triggers:
 
-- Market Overview gauge: broad 24h market bias from the active watchlist.
+- Market Overview gauge: broad 24h market bias from the active watchlist, measured on `OVERVIEW_TIMEFRAME` (default `15m`). The gauge reports the window it actually measured, so it never claims 24h when fewer candles are loaded.
 - Thai Market Brief: plain Thai summary of the current bias, focus coins, risk, and action plan.
 - News Impact: RSS-based crypto news context matched to the active watchlist, with simple impact, sentiment, coin impact, and Thai trading-context notes.
 - Top movers: strongest gainers and losers inside the active watchlist.
@@ -197,8 +200,10 @@ Do not commit `.env`. Use `.env.example` as the template.
 - `SYSTEM_ALERT_COOLDOWN_MINUTES`
 - `NEAR_CROSS_THRESHOLD_PCT`
 - `NEAR_VOLUME_RATIO_MIN`
+- `OVERVIEW_TIMEFRAME`
 - `DASHBOARD_PASSWORD`
 - `SESSION_SECRET`
+- `DASHBOARD_URL`
 
 Railway provides `PORT` automatically. The Dockerfile uses that value and falls back to `8000` locally.
 

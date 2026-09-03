@@ -2212,7 +2212,10 @@
         updateBrowserBiasTone(overview.bias_label || "Neutral");
         marketBiasNeedleEl.style.transform = `rotate(${biasAngle}deg)`;
         setStateValue(marketBiasLabelEl, overview.bias_label || "Neutral", biasState);
-        marketBiasScoreEl.textContent = `Score ${biasScore.toFixed(0)}/100 from 24h market breadth`;
+        const lookbackHours = Number(overview.lookback_hours || 24);
+        marketBiasScoreEl.textContent = `Score ${biasScore.toFixed(0)}/100 from ${
+          Number.isInteger(lookbackHours) ? lookbackHours : lookbackHours.toFixed(1)
+        }h market breadth (${overview.timeframe || "-"})`;
         setStateValue(marketDirectionEl, overview.direction, directionState);
         setStateValue(marketAverageEl, formatPercent(average), average >= 0 ? "ok" : "error");
         marketBreadthEl.textContent = `${breadth.toFixed(0)}% up`;
@@ -2330,7 +2333,15 @@
       async function loadStatus() {
         const status = await fetchJson("/status");
 
-        setStateValue(scannerStateEl, status.running ? "Running" : "Stopped", status.running ? "ok" : "error");
+        const loopStates = status.loop_states || {};
+        const recoveringLoops = Object.keys(loopStates).filter((name) => loopStates[name] === "restarting");
+        if (status.running) {
+          setStateValue(scannerStateEl, "Running", "ok");
+        } else if (recoveringLoops.length) {
+          setStateValue(scannerStateEl, `Recovering: ${recoveringLoops.join(", ")}`, "warn");
+        } else {
+          setStateValue(scannerStateEl, "Stopped", "error");
+        }
         setStateValue(
           websocketStateEl,
           status.websocket_connected ? "Connected" : "Connecting",

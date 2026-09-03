@@ -2,6 +2,8 @@ import asyncio
 import json
 import logging
 from collections import deque
+from collections.abc import Awaitable, Callable
+from contextlib import suppress
 from datetime import datetime, timedelta, timezone
 
 import httpx
@@ -11,10 +13,15 @@ import websockets
 from app.config import Settings
 from app.indicators import add_indicators
 from app.models import Signal
+from app.quality import clamp, rsi_quality_score, signal_quality, trader_summary
 from app.store import SignalStore
 from app.telegram import TelegramAlerter
 
 logger = logging.getLogger(__name__)
+
+LOOP_RESTART_SECONDS = 5
+WEBSOCKET_OPEN_TIMEOUT = 20
+WEBSOCKET_CLOSE_TIMEOUT = 10
 
 
 class MarketDataError(Exception):
@@ -53,20 +60,52 @@ class FuturesScanner:
         self._last_rest_refresh_at: datetime | None = None
         self._rest_backoff_until: datetime | None = None
         self._watchlist_updated_at: datetime | None = None
-        self._last_error: str | None = None
+        self._errors: dict[str, tuple[str, datetime]] = {}
         self._events: deque[dict] = deque(maxlen=50)
         self._last_alert_at: dict[str, datetime] = {}
         self._last_market_bias_label: str | None = None
         self._websocket_connected = False
         self._watchlist_version = 0
+        self._loop_states: dict[str, str] = {"rest": "stopped", "websocket": "stopped"}
+        self._candle_revisions: dict[tuple[str, str], int] = {}
+        self._indicator_frames: dict[tuple[str, str], tuple[int, pd.DataFrame]] = {}
+        self._indicator_snapshots: dict[tuple[str, str], tuple[int, dict | None]] = {}
 
     async def start(self) -> None:
         self._started_at = datetime.now(timezone.utc)
         self._record_event("info", "Scanner started.")
-        await asyncio.gather(self._refresh_candles_loop(), self._run_websocket_loop())
+        await asyncio.gather(
+            self._supervise_loop("rest", self._refresh_candles_loop),
+            self._supervise_loop("websocket", self._run_websocket_loop),
+        )
 
     async def stop(self) -> None:
         self._stop_event.set()
+
+    async def _supervise_loop(self, name: str, loop: Callable[[], Awaitable[None]]) -> None:
+        """Keep a background loop alive so one crash cannot silently kill the scanner."""
+        while not self._stop_event.is_set():
+            self._loop_states[name] = "running"
+            self._clear_error(f"loop:{name}")
+            try:
+                await loop()
+                if self._stop_event.is_set():
+                    break
+                message = f"{name} loop exited unexpectedly. Restarting in {LOOP_RESTART_SECONDS} seconds."
+            except asyncio.CancelledError:
+                self._loop_states[name] = "stopped"
+                raise
+            except Exception as exc:
+                message = f"{name} loop crashed: {exc}. Restarting in {LOOP_RESTART_SECONDS} seconds."
+                logger.exception("%s loop crashed. Restarting in %s seconds.", name, LOOP_RESTART_SECONDS)
+
+            self._loop_states[name] = "restarting"
+            self._set_error(f"loop:{name}", message)
+            self._record_event("error", message)
+            await self._send_system_alert(f"loop:{name}", message)
+            await asyncio.sleep(LOOP_RESTART_SECONDS)
+
+        self._loop_states[name] = "stopped"
 
     async def _refresh_candles_loop(self) -> None:
         while not self._stop_event.is_set():
@@ -74,11 +113,12 @@ class FuturesScanner:
                 now = datetime.now(timezone.utc)
                 if now < self._rest_backoff_until:
                     wait_seconds = (self._rest_backoff_until - now).total_seconds()
-                    self._last_error = (
+                    message = (
                         "Binance REST is cooling down after a rate-limit response. "
                         f"Next REST refresh after {self._rest_backoff_until.isoformat()}."
                     )
-                    self._record_event("warning", self._last_error)
+                    self._set_error("rest", message)
+                    self._record_event("warning", message)
                     await asyncio.sleep(min(wait_seconds, self.settings.rest_refresh_seconds))
                     continue
                 self._rest_backoff_until = None
@@ -107,26 +147,28 @@ class FuturesScanner:
             if isinstance(result, Exception):
                 had_error = True
                 if isinstance(result, MarketDataError):
-                    self._last_error = result.dashboard_message()
-                    self._record_event("error", self._last_error)
+                    message = result.dashboard_message()
+                    self._set_error("rest", message)
+                    self._record_event("error", message)
                     self._schedule_rest_backoff(result.status_code)
-                    await self._send_system_alert(f"market-data:{result.status_code}", self._last_error)
+                    await self._send_system_alert(f"market-data:{result.status_code}", message)
                 else:
-                    self._last_error = f"Initial candle load failed: {result}"
-                    self._record_event("error", self._last_error)
-                    await self._send_system_alert("market-data:load-failed", self._last_error)
+                    message = f"Initial candle load failed: {result}"
+                    self._set_error("rest", message)
+                    self._record_event("error", message)
+                    await self._send_system_alert("market-data:load-failed", message)
                 logger.error("Initial candle load failed: %s", result)
                 continue
             symbol, timeframe, candles = result
-            self._candles[(symbol, timeframe)] = candles
+            self._set_candles(symbol, timeframe, candles)
             signal = self._detect_signal(symbol, timeframe)
             if signal and self.store.add_if_new(signal, self.settings.signal_cooldown_minutes):
                 logger.info("New %s signal for %s %s from REST refresh.", signal.signal_type, symbol, timeframe)
                 await self.alerter.send_signal(signal)
         if not had_error:
-            if self._last_error:
+            if self._errors.get("rest"):
                 self._record_event("info", "Binance REST candle refresh recovered.")
-            self._last_error = None
+            self._clear_error("rest")
         self._initial_load_completed_at = datetime.now(timezone.utc)
         self._last_rest_refresh_at = self._initial_load_completed_at
         await self._maybe_send_market_bias_alert()
@@ -166,19 +208,21 @@ class FuturesScanner:
                 return
 
             if symbols != self._active_symbols:
-                old_pairs = set((symbol, timeframe) for symbol in symbols for timeframe in self.settings.timeframes)
-                self._candles = {key: value for key, value in self._candles.items() if key in old_pairs}
+                active_pairs = {(symbol, timeframe) for symbol in symbols for timeframe in self.settings.timeframes}
+                self._candles = {key: value for key, value in self._candles.items() if key in active_pairs}
+                self._forget_dropped_pairs(active_pairs)
                 self._active_symbols = symbols
                 self._watchlist_version += 1
                 self._record_event("info", f"Watchlist updated: {len(symbols)} symbols.")
                 logger.info("Updated auto watchlist: %s", ", ".join(symbols))
 
             self._watchlist_updated_at = datetime.now(timezone.utc)
-            self._last_error = None
+            self._clear_error("watchlist")
         except Exception as exc:
-            self._last_error = f"Auto watchlist refresh failed: {exc}"
-            self._record_event("error", self._last_error)
-            await self._send_system_alert("watchlist:refresh-failed", self._last_error)
+            message = f"Auto watchlist refresh failed: {exc}"
+            self._set_error("watchlist", message)
+            self._record_event("error", message)
+            await self._send_system_alert("watchlist:refresh-failed", message)
             logger.exception("Auto watchlist refresh failed.")
 
     async def _fetch_klines(
@@ -197,6 +241,7 @@ class FuturesScanner:
     async def _run_websocket_loop(self) -> None:
         backoff_seconds = 1
         while not self._stop_event.is_set():
+            websocket = None
             try:
                 websocket_version = self._watchlist_version
                 streams = "/".join(
@@ -204,40 +249,63 @@ class FuturesScanner:
                     for symbol in self._active_symbols
                     for timeframe in self.settings.timeframes
                 )
+                if not streams:
+                    await asyncio.sleep(LOOP_RESTART_SECONDS)
+                    continue
                 ws_url = f"{self.settings.binance_ws_url}?streams={streams}"
                 logger.info("Connecting to Binance websocket.")
-                async with websockets.connect(ws_url, ping_interval=20, ping_timeout=20) as websocket:
-                    self._websocket_connected = True
-                    self._last_error = None
-                    self._record_event("info", "Binance websocket connected.")
-                    backoff_seconds = 1
-                    while not self._stop_event.is_set():
-                        if websocket_version != self._watchlist_version:
-                            logger.info("Watchlist changed. Reconnecting websocket.")
-                            break
-                        message = await asyncio.wait_for(websocket.recv(), timeout=60)
-                        if self._stop_event.is_set():
-                            break
-                        await self._handle_ws_message(message)
+                websocket = await websockets.connect(
+                    ws_url,
+                    ping_interval=20,
+                    ping_timeout=20,
+                    open_timeout=WEBSOCKET_OPEN_TIMEOUT,
+                    close_timeout=WEBSOCKET_CLOSE_TIMEOUT,
+                )
+                self._websocket_connected = True
+                self._clear_error("websocket")
+                self._record_event("info", "Binance websocket connected.")
+                backoff_seconds = 1
+                while not self._stop_event.is_set():
+                    if websocket_version != self._watchlist_version:
+                        self._record_event("info", "Watchlist changed. Reconnecting websocket.")
+                        logger.info("Watchlist changed. Reconnecting websocket.")
+                        break
+                    message = await asyncio.wait_for(websocket.recv(), timeout=60)
+                    if self._stop_event.is_set():
+                        break
+                    await self._handle_ws_message(message)
             except TimeoutError:
-                self._record_event("warning", "Websocket receive timeout. Reconnecting.")
-                logger.info("Websocket receive timeout. Reconnecting.")
+                if websocket is None:
+                    message = f"Websocket connect timed out. Retrying in {backoff_seconds} seconds."
+                    self._set_error("websocket", message)
+                    self._record_event("warning", message)
+                    logger.warning(message)
+                    await asyncio.sleep(backoff_seconds)
+                    backoff_seconds = min(backoff_seconds * 2, 60)
+                else:
+                    self._record_event("warning", "Websocket receive timeout. Reconnecting.")
+                    logger.info("Websocket receive timeout. Reconnecting.")
             except asyncio.CancelledError:
                 raise
-            except Exception:
-                self._websocket_connected = False
-                self._last_error = f"Websocket connection failed. Reconnecting in {backoff_seconds} seconds."
-                self._record_event("error", self._last_error)
-                await self._send_system_alert("websocket:connection-failed", self._last_error)
+            except Exception as exc:
+                message = f"Websocket connection failed ({exc}). Reconnecting in {backoff_seconds} seconds."
+                self._set_error("websocket", message)
+                self._record_event("error", message)
+                await self._send_system_alert("websocket:connection-failed", message)
                 logger.exception("Websocket connection failed. Reconnecting in %s seconds.", backoff_seconds)
                 await asyncio.sleep(backoff_seconds)
                 backoff_seconds = min(backoff_seconds * 2, 60)
             finally:
                 self._websocket_connected = False
+                if websocket is not None:
+                    # Never let a stuck close handshake block the reconnect.
+                    with suppress(Exception):
+                        await asyncio.wait_for(websocket.close(), timeout=WEBSOCKET_CLOSE_TIMEOUT)
 
     async def _handle_ws_message(self, message: str) -> None:
         try:
             self._last_message_at = datetime.now(timezone.utc)
+            self._clear_error("websocket-message")
             payload = json.loads(message)
             kline = payload["data"]["k"]
             if not kline["x"]:
@@ -261,8 +329,9 @@ class FuturesScanner:
                 await self.alerter.send_signal(signal)
             await self._maybe_send_market_bias_alert()
         except (KeyError, ValueError, TypeError, json.JSONDecodeError):
-            self._last_error = "Failed to parse websocket message."
-            self._record_event("warning", self._last_error)
+            message = "Failed to parse websocket message."
+            self._set_error("websocket-message", message)
+            self._record_event("warning", message)
             logger.exception("Failed to parse websocket message.")
 
     def status(self) -> dict:
@@ -294,7 +363,7 @@ class FuturesScanner:
                     if (now - latest_time).total_seconds() > self._stale_after_seconds(timeframe):
                         stale_pair_count += 1
                     price = float(latest_row["close"])
-                    indicators = self._indicator_snapshot(candles)
+                    indicators = self._snapshot_for(symbol, timeframe)
                     if indicators:
                         near_setup = self._near_setup(symbol, timeframe, indicators)
                         if near_setup:
@@ -312,7 +381,7 @@ class FuturesScanner:
                     }
                 )
 
-        if self._last_error:
+        if self._errors.get("rest"):
             market_data_status = "Error"
         elif loaded_pair_count == 0:
             market_data_status = "Loading"
@@ -325,7 +394,8 @@ class FuturesScanner:
         best_setups = self._best_setups(market_overview, near_setups)
 
         return {
-            "running": self._started_at is not None and not self._stop_event.is_set(),
+            "running": self.is_running(),
+            "loop_states": dict(self._loop_states),
             "websocket_connected": self._websocket_connected,
             "telegram_enabled": self.alerter.enabled,
             "auto_watchlist_enabled": self.settings.auto_watchlist_enabled,
@@ -339,7 +409,7 @@ class FuturesScanner:
             "last_rest_refresh_at": self._last_rest_refresh_at.isoformat() if self._last_rest_refresh_at else None,
             "rest_backoff_until": self._rest_backoff_until.isoformat() if self._rest_backoff_until else None,
             "watchlist_updated_at": self._watchlist_updated_at.isoformat() if self._watchlist_updated_at else None,
-            "last_error": self._last_error,
+            "last_error": self.last_error,
             "signal_cooldown_minutes": self.settings.signal_cooldown_minutes,
             "market_data_status": market_data_status,
             "total_pair_count": total_pair_count,
@@ -356,12 +426,72 @@ class FuturesScanner:
     def symbols(self) -> list[str]:
         return list(self._active_symbols)
 
-    def indicator_series(self, symbol: str, timeframe: str, limit: int = 120) -> dict:
-        candles = self._candles.get((symbol, timeframe))
+    def is_running(self) -> bool:
+        if self._started_at is None or self._stop_event.is_set():
+            return False
+        return all(state == "running" for state in self._loop_states.values())
+
+    @property
+    def last_error(self) -> str | None:
+        if not self._errors:
+            return None
+        return max(self._errors.values(), key=lambda item: item[1])[0]
+
+    def _set_error(self, source: str, message: str) -> None:
+        self._errors[source] = (message, datetime.now(timezone.utc))
+
+    def _clear_error(self, source: str) -> None:
+        self._errors.pop(source, None)
+
+    def _set_candles(self, symbol: str, timeframe: str, candles: pd.DataFrame) -> None:
+        key = (symbol, timeframe)
+        self._candles[key] = candles
+        self._candle_revisions[key] = self._candle_revisions.get(key, 0) + 1
+
+    def _forget_dropped_pairs(self, active_pairs: set[tuple[str, str]]) -> None:
+        for cache in (self._candle_revisions, self._indicator_frames, self._indicator_snapshots):
+            for key in [key for key in cache if key not in active_pairs]:
+                cache.pop(key, None)
+
+    def _indicator_frame(self, symbol: str, timeframe: str) -> pd.DataFrame | None:
+        """Indicator frame for one pair, recomputed only when its candles change."""
+        key = (symbol, timeframe)
+        candles = self._candles.get(key)
         if candles is None or candles.empty:
+            return None
+
+        revision = self._candle_revisions.get(key, 0)
+        cached = self._indicator_frames.get(key)
+        if cached is not None and cached[0] == revision:
+            return cached[1]
+
+        frame = add_indicators(candles)
+        self._indicator_frames[key] = (revision, frame)
+        return frame
+
+    def _snapshot_for(self, symbol: str, timeframe: str) -> dict | None:
+        key = (symbol, timeframe)
+        revision = self._candle_revisions.get(key, 0)
+        cached = self._indicator_snapshots.get(key)
+        if cached is not None and cached[0] == revision:
+            return cached[1]
+
+        snapshot = self._indicator_snapshot(symbol, timeframe)
+        self._indicator_snapshots[key] = (revision, snapshot)
+        return snapshot
+
+    def _overview_timeframe(self) -> str:
+        configured = (self.settings.overview_timeframe or "").strip()
+        if configured and configured in self.settings.timeframes:
+            return configured
+        return self.settings.timeframes[0] if self.settings.timeframes else "15m"
+
+    def indicator_series(self, symbol: str, timeframe: str, limit: int = 120) -> dict:
+        frame = self._indicator_frame(symbol, timeframe)
+        if frame is None:
             return {"symbol": symbol, "timeframe": timeframe, "points": []}
 
-        df = add_indicators(candles).tail(limit)
+        df = frame.tail(limit)
         points = []
         for _, row in df.iterrows():
             points.append(
@@ -386,14 +516,17 @@ class FuturesScanner:
         else:
             updated = pd.concat([current[current["open_time"] != row["open_time"]], incoming], ignore_index=True)
         updated = updated.sort_values("open_time").tail(self.settings.kline_limit).reset_index(drop=True)
-        self._candles[key] = updated
+        self._set_candles(symbol, timeframe, updated)
 
     def _detect_signal(self, symbol: str, timeframe: str) -> Signal | None:
         candles = self._candles.get((symbol, timeframe))
         if candles is None or len(candles) < 200:
             return None
 
-        df = add_indicators(candles)
+        df = self._indicator_frame(symbol, timeframe)
+        if df is None:
+            return None
+
         latest = df.iloc[-1]
         previous = df.iloc[-2]
         required = ["ema_9", "ema_21", "ema_200", "rsi_14", "volume_avg_20"]
@@ -448,11 +581,11 @@ class FuturesScanner:
 
         close_time = latest["close_time"].to_pydatetime()
         signal_id = f"{symbol}:{timeframe}:{int(close_time.timestamp())}:{signal_type}"
-        quality = self._signal_quality(signal_type, price, ema_9, ema_21, ema_200, rsi, volume_ratio)
+        quality = signal_quality(signal_type, price, ema_9, ema_21, ema_200, rsi, volume_ratio)
         trade_plan = self._trade_plan(signal_type, df, len(df) - 1)
         backtest = self._signal_backtest(df, signal_type)
         status = self._signal_status(signal_type, trade_plan, df, close_time)
-        trader_summary = self._trader_summary(
+        summary = trader_summary(
             signal_type=signal_type,
             quality_label=quality["label"],
             quality_score=quality["score"],
@@ -486,7 +619,7 @@ class FuturesScanner:
             trade_plan=trade_plan,
             backtest=backtest,
             status=status,
-            trader_summary=trader_summary,
+            trader_summary=summary,
             created_at=datetime.now(timezone.utc),
             tradingview_url=f"https://www.tradingview.com/chart/?symbol=BINANCE:{symbol}.P",
         )
@@ -500,13 +633,20 @@ class FuturesScanner:
                 "status": signal.status or {"state": "waiting", "label": "Waiting for market data"},
             }
 
-        df = add_indicators(candles)
+        df = self._indicator_frame(signal.symbol, signal.timeframe)
+        if df is None:
+            return {
+                "trade_plan": signal.trade_plan or {},
+                "backtest": signal.backtest or {},
+                "status": signal.status or {"state": "waiting", "label": "Waiting for market data"},
+            }
+
         signal_time = self._signal_close_time(signal)
         signal_index = self._signal_index(df, signal_time)
         trade_plan = signal.trade_plan or self._trade_plan(signal.signal_type, df, signal_index)
         backtest = signal.backtest or self._signal_backtest(df, signal.signal_type)
         status = self._signal_status(signal.signal_type, trade_plan, df, signal_time)
-        trader_summary = signal.trader_summary or self._trader_summary(
+        summary = signal.trader_summary or trader_summary(
             signal_type=signal.signal_type,
             quality_label=signal.quality_label,
             quality_score=signal.quality_score,
@@ -516,7 +656,7 @@ class FuturesScanner:
             backtest=backtest,
             status=status,
         )
-        return {"trade_plan": trade_plan, "backtest": backtest, "status": status, "trader_summary": trader_summary}
+        return {"trade_plan": trade_plan, "backtest": backtest, "status": status, "trader_summary": summary}
 
     def _trade_plan(self, signal_type: str, df: pd.DataFrame, index: int | None = None) -> dict:
         if df.empty:
@@ -658,83 +798,6 @@ class FuturesScanner:
             "updated_at": latest_time,
         }
 
-    def _trader_summary(
-        self,
-        signal_type: str,
-        quality_label: str | None,
-        quality_score: float | None,
-        rsi: float,
-        volume_ratio: float,
-        trade_plan: dict,
-        backtest: dict,
-        status: dict,
-        news_context: dict | None = None,
-    ) -> str:
-        side_thai = "Long" if signal_type == "LONG" else "Short"
-        score = float(quality_score or 0)
-        risk_pct = float(trade_plan.get("risk_pct") or 0)
-        win_rate = float(backtest.get("win_rate") or 0)
-        sample_size = int(backtest.get("sample_size") or 0)
-        state = status.get("state")
-        relation = (news_context or {}).get("relation")
-
-        strengths = []
-        cautions = []
-
-        if score >= 85:
-            strengths.append(f"สัญญาณ {side_thai} แข็งแรงมากจาก quality {quality_label or ''} {score:.0f}")
-        elif score >= 70:
-            strengths.append(f"สัญญาณ {side_thai} ค่อนข้างดี quality {quality_label or ''} {score:.0f}")
-        elif score >= 55:
-            cautions.append("คุณภาพสัญญาณยังระดับต้องระวัง ควรรอ confirmation เพิ่ม")
-        else:
-            cautions.append("คุณภาพสัญญาณอ่อน ยังไม่เหมาะกับการรีบเข้าไม้")
-
-        if volume_ratio >= 2:
-            strengths.append(f"volume หนุนชัด {volume_ratio:.2f}x avg20")
-        elif volume_ratio >= 1:
-            strengths.append(f"volume ผ่านเกณฑ์ {volume_ratio:.2f}x avg20")
-
-        if signal_type == "LONG" and rsi >= 68:
-            cautions.append(f"RSI {rsi:.2f} เริ่มสูง ระวังไล่ราคา")
-        if signal_type == "SHORT" and rsi <= 32:
-            cautions.append(f"RSI {rsi:.2f} เริ่มต่ำ ระวังขายตามปลายทาง")
-
-        if risk_pct >= 6:
-            cautions.append(f"stop ค่อนข้างไกล {risk_pct:.2f}% ควรลดขนาดไม้")
-        elif 0 < risk_pct <= 3:
-            strengths.append(f"risk ต่อไม้คุมง่ายประมาณ {risk_pct:.2f}%")
-
-        if sample_size >= 5:
-            if win_rate >= 55:
-                strengths.append(f"backtest ระยะสั้นหนุน win rate {win_rate:.0f}% จาก {sample_size} ตัวอย่าง")
-            elif win_rate <= 40:
-                cautions.append(f"backtest ระยะสั้นยังไม่สวย win rate {win_rate:.0f}% จาก {sample_size} ตัวอย่าง")
-        else:
-            cautions.append("backtest ยังมีตัวอย่างน้อย ใช้เป็นบริบทเท่านั้น")
-
-        if relation == "conflicts":
-            cautions.append("มีข่าวขัดกับทิศทางสัญญาณ ควรรอความผันผวนสงบหรือใช้ size เล็ก")
-        elif relation == "supports":
-            strengths.append("ข่าวล่าสุดหนุนทิศทางสัญญาณ")
-
-        if state == "tp1":
-            action = "สัญญาณนี้ถึง TP1 แล้ว ไม่ควรไล่เข้าใหม่ถ้าไม่มี setup ใหม่ ให้เน้นจัดการกำไรหรือรอย่อ"
-        elif state == "stopped":
-            action = "สัญญาณนี้โดน stop แล้ว ควรตัดออกจากแผนและรอสัญญาณใหม่"
-        elif state == "expired":
-            action = "สัญญาณหมดอายุแล้ว เพราะไม่ไปถึง TP1 หรือ SL ในกรอบเวลาที่กำหนด ควรรอ setup ใหม่"
-        elif score >= 85 and risk_pct <= 6 and relation != "conflicts":
-            action = "แผนที่เหมาะคือรอราคาอยู่ใน entry zone แล้วค่อยพิจารณาเข้า ไม่ไล่ราคา และวาง stop ตามแผน"
-        elif score >= 70:
-            action = "ใช้เป็น setup เฝ้าดูได้ แต่ควรรอแท่งยืนยันหรือจังหวะย่อเข้าใกล้ entry zone ก่อน"
-        else:
-            action = "ยังไม่ควรรีบเข้าไม้ ให้รอ confirmation เพิ่มหรือเลือก setup ที่คุณภาพสูงกว่า"
-
-        strength_text = " จุดแข็ง: " + "; ".join(strengths[:3]) + "." if strengths else ""
-        caution_text = " ข้อควรระวัง: " + "; ".join(cautions[:3]) + "." if cautions else ""
-        return f"สรุปแบบเทรดเดอร์: {action}{strength_text}{caution_text}"
-
     def _historical_signal_matches(self, df: pd.DataFrame, index: int, signal_type: str) -> bool:
         latest = df.iloc[index]
         previous = df.iloc[index - 1]
@@ -825,49 +888,15 @@ class FuturesScanner:
             return (price - entry) / entry * 100
         return (entry - price) / entry * 100
 
-    def _signal_quality(
-        self,
-        signal_type: str,
-        price: float,
-        ema_9: float,
-        ema_21: float,
-        ema_200: float,
-        rsi: float,
-        volume_ratio: float,
-    ) -> dict:
-        trend_distance_pct = abs(price - ema_200) / price * 100 if price > 0 else 0
-        cross_gap_pct = abs(ema_9 - ema_21) / price * 100 if price > 0 else 0
-        trend_score = self._clamp(trend_distance_pct / 1.2 * 100, 35, 100)
-        cross_score = self._clamp(cross_gap_pct / 0.35 * 100, 35, 100)
-        volume_score = self._clamp(volume_ratio / 1.8 * 100, 35, 100)
-        rsi_score = self._rsi_quality_score(signal_type, rsi)
-        score = self._clamp(
-            trend_score * 0.28 + cross_score * 0.2 + rsi_score * 0.24 + volume_score * 0.28,
-            0,
-            100,
-        )
-        if score >= 85:
-            label = "Excellent"
-        elif score >= 70:
-            label = "Strong"
-        elif score >= 55:
-            label = "Caution"
-        else:
-            label = "Weak"
-
-        reasons = [
-            f"Trend distance {trend_distance_pct:.2f}% from EMA200",
-            f"EMA cross gap {cross_gap_pct:.3f}%",
-            f"RSI quality {rsi_score:.0f}/100",
-            f"Volume strength {volume_ratio:.2f}x avg20",
-        ]
-        return {"score": score, "label": label, "reasons": reasons}
-
-    def _indicator_snapshot(self, candles: pd.DataFrame) -> dict | None:
-        if len(candles) < 200:
+    def _indicator_snapshot(self, symbol: str, timeframe: str) -> dict | None:
+        candles = self._candles.get((symbol, timeframe))
+        if candles is None or len(candles) < 200:
             return None
 
-        df = add_indicators(candles)
+        df = self._indicator_frame(symbol, timeframe)
+        if df is None:
+            return None
+
         latest = df.iloc[-1]
         required = ["ema_9", "ema_21", "ema_200", "rsi_14", "volume_avg_20"]
         if latest[required].isna().any():
@@ -922,9 +951,10 @@ class FuturesScanner:
         }
 
     def _market_overview(self) -> dict:
-        timeframe = self.settings.timeframes[0] if self.settings.timeframes else "15m"
+        timeframe = self._overview_timeframe()
         timeframe_seconds = self._timeframe_seconds(timeframe)
         lookback_periods = max(1, round((24 * 60 * 60) / timeframe_seconds))
+        covered_periods = lookback_periods
         movers = []
 
         for symbol in self._active_symbols:
@@ -932,9 +962,14 @@ class FuturesScanner:
             if candles is None or candles.empty:
                 continue
 
+            # Loaded candles can cover less than 24h, so report the window actually measured.
+            periods = min(lookback_periods, len(candles) - 1)
+            if periods <= 0:
+                continue
+
+            covered_periods = min(covered_periods, periods)
             latest = candles.iloc[-1]
-            reference_index = max(0, len(candles) - lookback_periods - 1)
-            reference = candles.iloc[reference_index]
+            reference = candles.iloc[len(candles) - 1 - periods]
             latest_close = float(latest["close"])
             reference_close = float(reference["close"])
             if reference_close <= 0:
@@ -973,7 +1008,7 @@ class FuturesScanner:
 
         return {
             "timeframe": timeframe,
-            "lookback_hours": 24,
+            "lookback_hours": round(covered_periods * timeframe_seconds / 3600, 1),
             "direction": direction,
             "bias_label": bias_label,
             "bias_score": bias_score,
@@ -987,7 +1022,7 @@ class FuturesScanner:
         }
 
     def _best_setups(self, overview: dict, near_setups: list[dict]) -> list[dict]:
-        timeframe = overview.get("timeframe") or (self.settings.timeframes[0] if self.settings.timeframes else "15m")
+        timeframe = overview.get("timeframe") or self._overview_timeframe()
         movers = {item["symbol"]: item for item in overview.get("movers", [])}
         near_by_symbol = {item["symbol"]: item for item in near_setups if item.get("timeframe") == timeframe}
         bias_label = overview.get("bias_label", "Neutral")
@@ -997,7 +1032,7 @@ class FuturesScanner:
             candles = self._candles.get((symbol, timeframe))
             if candles is None or len(candles) < 200 or symbol not in movers:
                 continue
-            indicators = self._indicator_snapshot(candles)
+            indicators = self._snapshot_for(symbol, timeframe)
             if not indicators:
                 continue
 
@@ -1010,17 +1045,17 @@ class FuturesScanner:
             ) or (
                 side == "SHORT" and indicators["price"] < indicators["ema_200"]
             )
-            momentum_score = self._clamp(abs(change_pct) / 4 * 100, 0, 100)
+            momentum_score = clamp(abs(change_pct) / 4 * 100, 0, 100)
             if side == "LONG" and change_pct < 0:
                 momentum_score *= 0.35
             if side == "SHORT" and change_pct > 0:
                 momentum_score *= 0.35
-            rsi_score = self._rsi_quality_score(side, indicators["rsi_14"])
-            volume_score = self._clamp(indicators["volume_ratio"] / 1.5 * 100, 0, 100)
+            rsi_score = rsi_quality_score(side, indicators["rsi_14"])
+            volume_score = clamp(indicators["volume_ratio"] / 1.5 * 100, 0, 100)
             liquidity_score = 100 - (rank / max(1, len(self._active_symbols) - 1) * 30)
             setup_bonus = 20 if setup and setup.get("setup_type") == side else 0
             trend_bonus = 12 if trend_aligned else -10
-            score = self._clamp(
+            score = clamp(
                 momentum_score * 0.28
                 + rsi_score * 0.2
                 + volume_score * 0.16
@@ -1101,24 +1136,6 @@ class FuturesScanner:
         if change_pct < 0 and indicators["price"] < indicators["ema_200"]:
             return "SHORT"
         return "LONG" if change_pct >= 0 else "SHORT"
-
-    @staticmethod
-    def _rsi_quality_score(side: str, rsi: float) -> float:
-        if side == "LONG":
-            if 50 <= rsi <= 68:
-                return 100
-            if 45 <= rsi < 50:
-                return 70
-            if 68 < rsi <= 75:
-                return 65
-            return 35
-        if 32 <= rsi <= 50:
-            return 100
-        if 50 < rsi <= 55:
-            return 70
-        if 25 <= rsi < 32:
-            return 65
-        return 35
 
     def _thai_market_brief(self, overview: dict, best_setups: list[dict] | None = None) -> str:
         movers = overview.get("movers", [])
@@ -1240,10 +1257,6 @@ class FuturesScanner:
     @staticmethod
     def _stale_after_seconds(timeframe: str) -> int:
         return FuturesScanner._timeframe_seconds(timeframe) * 3
-
-    @staticmethod
-    def _clamp(value: float, minimum: float, maximum: float) -> float:
-        return max(minimum, min(maximum, value))
 
     def _record_event(self, level: str, message: str) -> None:
         self._events.appendleft(

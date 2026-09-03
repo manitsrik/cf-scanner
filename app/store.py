@@ -9,6 +9,10 @@ from threading import Lock
 
 from app.models import Signal
 
+# Signal ids stay in memory well past the stored window so a replayed candle is
+# still recognised as a duplicate, but the set cannot grow without bound.
+SEEN_ID_HISTORY_FACTOR = 10
+
 
 class SignalStore:
     def __init__(self, limit: int = 100, db_path: str | None = None) -> None:
@@ -16,6 +20,8 @@ class SignalStore:
         self.db_path = Path(db_path) if db_path else None
         self._signals: deque[Signal] = deque(maxlen=limit)
         self._seen: set[str] = set()
+        self._seen_order: deque[str] = deque()
+        self._seen_limit = max(limit * SEEN_ID_HISTORY_FACTOR, limit, 1)
         self._last_signal_at: dict[tuple[str, str, str], datetime] = {}
         self._lock = Lock()
         self._initialize_db()
@@ -33,7 +39,7 @@ class SignalStore:
                 if now - last_signal_at < timedelta(minutes=cooldown_minutes):
                     return False
 
-            self._seen.add(signal.id)
+            self._remember_seen(signal.id)
             self._last_signal_at[key] = now
             self._signals.appendleft(signal)
             self._save_signal(signal)
@@ -92,8 +98,17 @@ class SignalStore:
 
         for signal in self._list_saved_signals():
             self._signals.append(signal)
-            self._seen.add(signal.id)
+            self._remember_seen(signal.id)
             self._remember_last_signal(signal)
+
+    def _remember_seen(self, signal_id: str) -> None:
+        if signal_id in self._seen:
+            return
+
+        self._seen.add(signal_id)
+        self._seen_order.append(signal_id)
+        while len(self._seen_order) > self._seen_limit:
+            self._seen.discard(self._seen_order.popleft())
 
     def _list_saved_signals(self) -> list[Signal]:
         if not self.db_path or not self.db_path.exists():

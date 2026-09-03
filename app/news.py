@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import re
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
@@ -6,6 +7,10 @@ from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 
 import httpx
+
+logger = logging.getLogger(__name__)
+
+ATOM_NAMESPACE = "http://www.w3.org/2005/Atom"
 
 
 @dataclass(frozen=True)
@@ -130,8 +135,9 @@ class CryptoNewsService:
 
         items: list[dict] = []
         seen_links: set[str] = set()
-        for result in results:
+        for source, result in zip(DEFAULT_NEWS_SOURCES, results):
             if isinstance(result, Exception):
+                logger.warning("News source %s failed: %s", source.name, result)
                 continue
             for item in result:
                 link = item.get("url") or item.get("title")
@@ -147,23 +153,51 @@ class CryptoNewsService:
         response = await client.get(source.url, headers={"User-Agent": "CF Scanner news reader/1.0"})
         response.raise_for_status()
         root = ET.fromstring(response.text)
-        items = []
-        for node in root.findall(".//item")[:20]:
-            title = self._text(node, "title")
-            if not title:
-                continue
-            description = self._strip_html(self._text(node, "description"))
-            published_at = self._parse_date(self._text(node, "pubDate"))
-            items.append(
-                {
-                    "source": source.name,
-                    "title": title,
-                    "url": self._text(node, "link"),
-                    "published_at": published_at,
-                    "summary": description[:220],
-                }
-            )
+
+        nodes = root.findall(".//item")
+        if nodes:
+            items = [self._rss_item(source, node) for node in nodes[:20]]
+        else:
+            entries = root.findall(f".//{{{ATOM_NAMESPACE}}}entry")
+            items = [self._atom_item(source, node) for node in entries[:20]]
+
+        items = [item for item in items if item]
+        if not items:
+            logger.warning("News source %s returned no readable items.", source.name)
         return items
+
+    def _rss_item(self, source: NewsSource, node: ET.Element) -> dict | None:
+        title = self._text(node, "title")
+        if not title:
+            return None
+        return {
+            "source": source.name,
+            "title": title,
+            "url": self._text(node, "link"),
+            "published_at": self._parse_date(self._text(node, "pubDate")),
+            "summary": self._strip_html(self._text(node, "description"))[:220],
+        }
+
+    def _atom_item(self, source: NewsSource, node: ET.Element) -> dict | None:
+        title = self._text(node, f"{{{ATOM_NAMESPACE}}}title")
+        if not title:
+            return None
+
+        link_node = node.find(f"{{{ATOM_NAMESPACE}}}link")
+        url = link_node.get("href", "") if link_node is not None else ""
+        published = self._text(node, f"{{{ATOM_NAMESPACE}}}published") or self._text(
+            node, f"{{{ATOM_NAMESPACE}}}updated"
+        )
+        summary = self._text(node, f"{{{ATOM_NAMESPACE}}}summary") or self._text(
+            node, f"{{{ATOM_NAMESPACE}}}content"
+        )
+        return {
+            "source": source.name,
+            "title": title,
+            "url": url,
+            "published_at": self._parse_date(published),
+            "summary": self._strip_html(summary)[:220],
+        }
 
     def _filter_payload(self, payload: dict, symbols: list[str]) -> dict:
         active_symbols = symbols or []
@@ -329,13 +363,22 @@ class CryptoNewsService:
     def _parse_date(value: str) -> str | None:
         if not value:
             return None
+
+        parsed = None
         try:
             parsed = parsedate_to_datetime(value)
-            if parsed.tzinfo is None:
-                parsed = parsed.replace(tzinfo=timezone.utc)
-            return parsed.astimezone(timezone.utc).isoformat()
         except (TypeError, ValueError):
+            try:
+                # Atom feeds publish ISO 8601 timestamps instead of RFC 2822.
+                parsed = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+            except ValueError:
+                return None
+
+        if parsed is None:
             return None
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc).isoformat()
 
     @staticmethod
     def _strip_html(value: str) -> str:
