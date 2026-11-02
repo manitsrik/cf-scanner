@@ -36,6 +36,7 @@ scanner_task: asyncio.Task | None = None
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     global scanner_task
+    alerter.start()
     scanner_task = asyncio.create_task(scanner.start())
     try:
         yield
@@ -45,6 +46,7 @@ async def lifespan(_: FastAPI):
             scanner_task.cancel()
             with suppress(asyncio.CancelledError):
                 await scanner_task
+        await alerter.stop()
 
 
 app = FastAPI(title=settings.app_name, lifespan=lifespan)
@@ -233,5 +235,5 @@ async def test_telegram(_: None = ApiAuth) -> dict[str, str]:
 
     sent = await alerter.send_text("CF Scanner test alert: Telegram is connected.")
     if not sent:
-        return {"status": "failed", "message": "Telegram API request failed."}
+        return {"status": "failed", "message": alerter.status()["last_error"] or "Telegram API request failed."}
     return {"status": "sent"}

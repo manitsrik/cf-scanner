@@ -2347,7 +2347,7 @@
           status.websocket_connected ? "Connected" : "Connecting",
           status.websocket_connected ? "ok" : "warn"
         );
-        setStateValue(telegramStateEl, status.telegram_enabled ? "Enabled" : "Disabled", status.telegram_enabled ? "ok" : "muted");
+        renderTelegramState(status.telegram || { enabled: status.telegram_enabled });
         const nearSetupCount = (status.near_setups || []).length;
         setStateValue(
           nearSetupStateEl,
@@ -2583,12 +2583,31 @@
         }
       }
 
+      function renderTelegramState(telegram) {
+        telegramStateEl.title = telegram.last_error
+          ? `${telegram.last_error} (${formatTime(telegram.last_error_at)})`
+          : "";
+        if (!telegram.enabled) {
+          setStateValue(telegramStateEl, "Disabled", "muted");
+        } else if (telegram.last_error) {
+          setStateValue(telegramStateEl, "Send failing", "error");
+        } else if (telegram.failed_count) {
+          setStateValue(telegramStateEl, `Enabled · ${telegram.failed_count} failed`, "warn");
+        } else {
+          setStateValue(telegramStateEl, telegram.queued ? `Sending ${telegram.queued}` : "Enabled", "ok");
+        }
+      }
+
       async function testTelegram() {
         testTelegramButton.disabled = true;
         testTelegramButton.textContent = "Sending...";
         try {
           const result = await fetchJson("/telegram/test", { method: "POST" });
-          testTelegramButton.textContent = result.status === "sent" ? "Sent" : "Disabled";
+          testTelegramButton.textContent =
+            result.status === "sent" ? "Sent" : result.status === "failed" ? "Failed" : "Disabled";
+          if (result.status === "failed") {
+            setStateValue(lastErrorEl, result.message || "Telegram test failed.", "error");
+          }
         } catch (error) {
           testTelegramButton.textContent = "Failed";
           setStateValue(lastErrorEl, error.message || "Telegram test failed.", "error");

@@ -13,16 +13,16 @@ This app does not place trades, does not use private Binance API keys, and does 
 - Indicators: EMA 9, EMA 21, EMA 200, RSI 14, volume average 20
 - LONG and SHORT signal detection
 - SQLite-backed latest signal storage
-- Telegram alert for each new signal
+- Telegram alert for each new signal on `TELEGRAM_TIMEFRAMES` (default `15m,30m,1h`; 5m signals stay on the dashboard only), sent from a background queue with retries so a slow or rate-limited Telegram API never delays candle processing
 - Simple HTML dashboard
 - Signal reason details, dashboard filters, time range filters, and load-more controls
 - Signal cooldown and near-setup monitoring
 - Runtime health metrics for market data freshness
 - Supervised background loops: a crashed REST or websocket loop restarts itself and is reported by `/health` and `/status`
-- Color status badges, system event log, and Telegram system alerts
+- Color status badges, system event log, and Telegram system alerts with a follow-up message when the problem recovers
 - Market Overview gauge, risk panel, top movers, and opportunity-ranked best setups
 - Thai Market Brief summary generated from the current market overview, risk checks, and best setups
-- Telegram system alert with Thai Market Brief when market bias changes
+- Telegram alert with Thai Market Brief when market bias changes and holds for one full `OVERVIEW_TIMEFRAME` candle
 - Docker-ready deployment
 
 ## Signal Rules
@@ -64,6 +64,7 @@ Create a `.env` file if you want Telegram alerts:
 ```env
 TELEGRAM_BOT_TOKEN=your_bot_token
 TELEGRAM_CHAT_ID=your_chat_id
+TELEGRAM_TIMEFRAMES=15m,30m,1h
 SIGNAL_DB_PATH=data/signals.db
 SIGNAL_LIMIT=100
 AUTO_WATCHLIST_ENABLED=true
@@ -115,7 +116,7 @@ pytest
 - `GET /news`
 - `POST /telegram/test`
 
-`/status` shows scanner runtime state, websocket state, Telegram status, market-data freshness, stale pair counts, latest system events, and latest closed candle time for every configured symbol/timeframe.
+`/status` shows scanner runtime state, websocket state, Telegram delivery status (queued messages, failures, last error), market-data freshness, stale pair counts, latest system events, and latest closed candle time for every configured symbol/timeframe.
 
 `/health` stays public for uptime checks and returns a compact health summary with running state, per-loop state, market-data status, websocket state, loaded pair counts, stale pair counts, and the latest error. `running` is true only while both background loops (REST refresh and websocket) are actually alive, so a crashed loop shows up as `warning` instead of a silent failure.
 
@@ -123,7 +124,7 @@ pytest
 
 `/news` returns recent RSS news matched to the active watchlist, including simple impact, sentiment, and Thai summary text for dashboard context.
 
-`/telegram/test` sends a test Telegram message when `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` are configured.
+`/telegram/test` sends a test Telegram message when `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` are configured, and returns the Telegram error if it fails.
 
 ## Dashboard Login
 
@@ -193,6 +194,7 @@ Do not commit `.env`. Use `.env.example` as the template.
 
 - `TELEGRAM_BOT_TOKEN`
 - `TELEGRAM_CHAT_ID`
+- `TELEGRAM_TIMEFRAMES`
 - `SIGNAL_DB_PATH`
 - `RAILWAY_VOLUME_MOUNT_PATH` (provided automatically when a Railway Volume is attached)
 - `SIGNAL_LIMIT`

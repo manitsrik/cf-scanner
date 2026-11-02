@@ -11,6 +11,7 @@ import pandas as pd
 import websockets
 
 from app.config import Settings
+from app.formatting import format_price
 from app.indicators import add_indicators
 from app.models import Signal
 from app.quality import clamp, rsi_quality_score, signal_quality, trader_summary
@@ -66,7 +67,11 @@ class FuturesScanner:
         self._errors: dict[str, tuple[str, datetime]] = {}
         self._events: deque[dict] = deque(maxlen=50)
         self._last_alert_at: dict[str, datetime] = {}
-        self._last_market_bias_label: str | None = None
+        # Incident groups (e.g. "websocket") that sent a Telegram alert and still await recovery.
+        self._open_incidents: set[str] = set()
+        # The bias last announced on Telegram, and a new bias waiting to be confirmed.
+        self._alerted_bias_label: str | None = None
+        self._bias_candidate: tuple[str, datetime] | None = None
         self._websocket_connected = False
         self._watchlist_version = 0
         self._loop_states: dict[str, str] = {"rest": "stopped", "websocket": "stopped"}
@@ -105,7 +110,7 @@ class FuturesScanner:
             self._loop_states[name] = "restarting"
             self._set_error(f"loop:{name}", message)
             self._record_event("error", message)
-            await self._send_system_alert(f"loop:{name}", message)
+            self._send_system_alert(f"loop:{name}", message)
             await asyncio.sleep(LOOP_RESTART_SECONDS)
 
         self._loop_states[name] = "stopped"
@@ -164,12 +169,12 @@ class FuturesScanner:
                     message = result.dashboard_message()
                     self._set_error("rest", message)
                     self._record_event("error", message)
-                    await self._send_system_alert(f"market-data:{result.status_code}", message)
+                    self._send_system_alert(f"market-data:{result.status_code}", message)
                 else:
                     message = f"Initial candle load failed: {result}"
                     self._set_error("rest", message)
                     self._record_event("error", message)
-                    await self._send_system_alert("market-data:load-failed", message)
+                    self._send_system_alert("market-data:load-failed", message)
                 logger.error("Initial candle load failed: %s", result)
                 continue
             symbol, timeframe, candles = result
@@ -177,14 +182,15 @@ class FuturesScanner:
             signal = self._detect_signal(symbol, timeframe)
             if signal and self.store.add_if_new(signal, self.settings.signal_cooldown_minutes):
                 logger.info("New %s signal for %s %s from REST refresh.", signal.signal_type, symbol, timeframe)
-                await self.alerter.send_signal(signal)
+                self._alert_signal(signal)
         if not had_error:
             if self._errors.get("rest"):
                 self._record_event("info", "Binance REST candle refresh recovered.")
             self._clear_error("rest")
+            self._resolve_incident("market-data", "Binance REST candle refresh recovered.")
         self._initial_load_completed_at = datetime.now(timezone.utc)
         self._last_rest_refresh_at = self._initial_load_completed_at
-        await self._maybe_send_market_bias_alert()
+        self._maybe_send_market_bias_alert()
 
     async def _refresh_watchlist(self) -> None:
         if not self.settings.auto_watchlist_enabled:
@@ -231,11 +237,12 @@ class FuturesScanner:
 
             self._watchlist_updated_at = datetime.now(timezone.utc)
             self._clear_error("watchlist")
+            self._resolve_incident("watchlist", "Auto watchlist refresh recovered.")
         except Exception as exc:
             message = f"Auto watchlist refresh failed: {exc}"
             self._set_error("watchlist", message)
             self._record_event("error", message)
-            await self._send_system_alert("watchlist:refresh-failed", message)
+            self._send_system_alert("watchlist:refresh-failed", message)
             logger.exception("Auto watchlist refresh failed.")
 
     async def _fetch_klines(
@@ -277,6 +284,7 @@ class FuturesScanner:
                 self._websocket_connected = True
                 self._clear_error("websocket")
                 self._record_event("info", "Binance websocket connected.")
+                self._resolve_incident("websocket", "Binance websocket reconnected.")
                 backoff_seconds = 1
                 while not self._stop_event.is_set():
                     if websocket_version != self._watchlist_version:
@@ -304,7 +312,7 @@ class FuturesScanner:
                 message = f"Websocket connection failed ({exc}). Reconnecting in {backoff_seconds} seconds."
                 self._set_error("websocket", message)
                 self._record_event("error", message)
-                await self._send_system_alert("websocket:connection-failed", message)
+                self._send_system_alert("websocket:connection-failed", message)
                 logger.exception("Websocket connection failed. Reconnecting in %s seconds.", backoff_seconds)
                 await asyncio.sleep(backoff_seconds)
                 backoff_seconds = min(backoff_seconds * 2, 60)
@@ -339,8 +347,8 @@ class FuturesScanner:
             signal = self._detect_signal(symbol, timeframe)
             if signal and self.store.add_if_new(signal, self.settings.signal_cooldown_minutes):
                 logger.info("New %s signal for %s %s.", signal.signal_type, symbol, timeframe)
-                await self.alerter.send_signal(signal)
-            await self._maybe_send_market_bias_alert()
+                self._alert_signal(signal)
+            self._maybe_send_market_bias_alert()
         except (KeyError, ValueError, TypeError, json.JSONDecodeError):
             message = "Failed to parse websocket message."
             self._set_error("websocket-message", message)
@@ -411,6 +419,7 @@ class FuturesScanner:
             "loop_states": dict(self._loop_states),
             "websocket_connected": self._websocket_connected,
             "telegram_enabled": self.alerter.enabled,
+            "telegram": {**self.alerter.status(), "timeframes": self.settings.telegram_timeframes},
             "auto_watchlist_enabled": self.settings.auto_watchlist_enabled,
             "watchlist_size": len(self._active_symbols),
             "active_symbols": self._active_symbols,
@@ -595,17 +604,19 @@ class FuturesScanner:
         if not signal_type:
             return None
 
+        p = format_price
+        emas = f"{p(previous_ema_9)}/{p(previous_ema_21)} -> {p(ema_9)}/{p(ema_21)}"
         if signal_type == "LONG":
             reasons = [
-                f"Price {price:.4f} is above EMA200 {ema_200:.4f}",
-                f"EMA9 crossed above EMA21 ({previous_ema_9:.4f}/{previous_ema_21:.4f} -> {ema_9:.4f}/{ema_21:.4f})",
+                f"Price {p(price)} is above EMA200 {p(ema_200)}",
+                f"EMA9 crossed above EMA21 ({emas})",
                 f"RSI14 is bullish at {rsi:.2f}",
                 f"Volume is {volume_ratio:.2f}x average 20",
             ]
         else:
             reasons = [
-                f"Price {price:.4f} is below EMA200 {ema_200:.4f}",
-                f"EMA9 crossed below EMA21 ({previous_ema_9:.4f}/{previous_ema_21:.4f} -> {ema_9:.4f}/{ema_21:.4f})",
+                f"Price {p(price)} is below EMA200 {p(ema_200)}",
+                f"EMA9 crossed below EMA21 ({emas})",
                 f"RSI14 is bearish at {rsi:.2f}",
                 f"Volume is {volume_ratio:.2f}x average 20",
             ]
@@ -1276,20 +1287,34 @@ class FuturesScanner:
             return "เน้นหา Short จากเหรียญที่อ่อนกว่าตลาด และรอ confirmation ก่อนเข้า"
         return "รอ confirmation ลดขนาดไม้ และเลือกเทรดเฉพาะ setup ที่ชัด"
 
-    async def _maybe_send_market_bias_alert(self) -> None:
+    def _maybe_send_market_bias_alert(self) -> None:
         overview = self._market_overview()
         bias_label = overview.get("bias_label")
         if bias_label in {None, "Loading"}:
             return
-        if self._last_market_bias_label is None:
-            self._last_market_bias_label = bias_label
+        if self._alerted_bias_label is None:
+            self._alerted_bias_label = bias_label
             return
-        if bias_label == self._last_market_bias_label:
+        if bias_label == self._alerted_bias_label:
+            self._bias_candidate = None
             return
 
-        previous = self._last_market_bias_label
-        self._last_market_bias_label = bias_label
-        best_setups = self._best_setups(overview, [])
+        # A new bias must hold for one full overview candle before it is announced.
+        # This ignores flips while closed candles arrive one symbol at a time, and
+        # compares against the last *announced* bias so a reversal is never lost.
+        now = datetime.now(timezone.utc)
+        if self._bias_candidate is None or self._bias_candidate[0] != bias_label:
+            self._bias_candidate = (bias_label, now)
+            return
+        confirm_seconds = self._timeframe_seconds(overview.get("timeframe") or self._overview_timeframe())
+        if (now - self._bias_candidate[1]).total_seconds() < confirm_seconds:
+            return
+
+        previous = self._alerted_bias_label
+        self._alerted_bias_label = bias_label
+        self._bias_candidate = None
+        timeframe = overview.get("timeframe") or self._overview_timeframe()
+        best_setups = self._best_setups(overview, self._near_setups_for(timeframe))
         thai_brief = self._thai_market_brief(overview, best_setups)
         previous_badge = self._bias_badge(previous)
         current_badge = self._bias_badge(bias_label)
@@ -1302,7 +1327,16 @@ class FuturesScanner:
             f"{thai_brief}"
         )
         self._record_event("info", message)
-        await self._send_system_alert("market-bias", message)
+        self.alerter.notify(message)
+
+    def _near_setups_for(self, timeframe: str) -> list[dict]:
+        setups = []
+        for symbol in self._active_symbols:
+            indicators = self._snapshot_for(symbol, timeframe)
+            setup = self._near_setup(symbol, timeframe, indicators) if indicators else None
+            if setup:
+                setups.append(setup)
+        return setups
 
     @staticmethod
     def _bias_badge(label: str | None) -> str:
@@ -1345,7 +1379,11 @@ class FuturesScanner:
         if self._rest_backoff_until is None or backoff_until > self._rest_backoff_until:
             self._rest_backoff_until = backoff_until
 
-    async def _send_system_alert(self, key: str, message: str) -> None:
+    def _alert_signal(self, signal: Signal) -> None:
+        if signal.timeframe in self.settings.telegram_timeframes:
+            self.alerter.notify_signal(signal, self._signal_close_time(signal))
+
+    def _send_system_alert(self, key: str, message: str) -> None:
         if not self.alerter.enabled:
             return
 
@@ -1356,7 +1394,15 @@ class FuturesScanner:
             return
 
         self._last_alert_at[key] = now
-        await self.alerter.send_text(f"CF Scanner system alert\n{message}")
+        self._open_incidents.add(key.split(":", 1)[0])
+        self.alerter.notify(f"⚠️ CF Scanner system alert\n{message}")
+
+    def _resolve_incident(self, incident: str, message: str) -> None:
+        """Tell Telegram a problem is over, but only if that problem was alerted."""
+        if incident not in self._open_incidents:
+            return
+        self._open_incidents.discard(incident)
+        self.alerter.notify(f"✅ CF Scanner recovered\n{message}")
 
     @staticmethod
     def _clean_number(value) -> float | None:

@@ -14,7 +14,18 @@ from app.telegram import TelegramAlerter
 CANDLE = timedelta(minutes=15)
 
 
-def make_scanner(store: SignalStore | None = None, **overrides) -> FuturesScanner:
+class CaptureAlerter(TelegramAlerter):
+    def __init__(self) -> None:
+        super().__init__("1:token", "42")
+        self.messages: list[str] = []
+
+    def notify(self, text: str) -> None:
+        self.messages.append(text)
+
+
+def make_scanner(
+    store: SignalStore | None = None, alerter: TelegramAlerter | None = None, **overrides
+) -> FuturesScanner:
     options = {
         "auto_watchlist_enabled": False,
         "telegram_bot_token": None,
@@ -22,7 +33,11 @@ def make_scanner(store: SignalStore | None = None, **overrides) -> FuturesScanne
         **overrides,
     }
     settings = Settings(_env_file=None, **options)
-    return FuturesScanner(settings, store or SignalStore(limit=100, db_path=None), TelegramAlerter(None, None))
+    return FuturesScanner(
+        settings,
+        store or SignalStore(limit=100, db_path=None),
+        alerter or TelegramAlerter(None, None),
+    )
 
 
 def flat_candles(count: int, start: datetime, price: float = 100.0) -> pd.DataFrame:
@@ -210,3 +225,75 @@ def test_final_status_is_saved_and_frozen(tmp_path):
     assert saved.status["state"] == "tp1"
     # A fresh scanner with no candles (e.g. after a restart) keeps the saved outcome.
     assert make_scanner(store=store).enrich_signal_context(saved)["status"]["state"] == "tp1"
+
+
+def observe_bias(scanner: FuturesScanner, label: str, minutes_later: int = 0) -> None:
+    if minutes_later and scanner._bias_candidate:
+        candidate, since = scanner._bias_candidate
+        scanner._bias_candidate = (candidate, since - timedelta(minutes=minutes_later))
+    overview = {"bias_label": label, "timeframe": "15m", "movers": [{"symbol": "BTCUSDT", "change_pct": 1.0}]}
+    scanner._market_overview = lambda: overview
+    scanner._maybe_send_market_bias_alert()
+
+
+def test_bias_reversal_is_announced_after_confirmation():
+    alerter = CaptureAlerter()
+    scanner = make_scanner(alerter=alerter, timeframes=["15m"])
+
+    observe_bias(scanner, "Neutral")
+    observe_bias(scanner, "Long Bias")
+    assert alerter.messages == []
+    observe_bias(scanner, "Long Bias", minutes_later=16)
+    # Previously a reversal inside the 30 minute cooldown was never announced.
+    observe_bias(scanner, "Neutral", minutes_later=5)
+    observe_bias(scanner, "Neutral", minutes_later=16)
+
+    assert len(alerter.messages) == 2
+    assert "Neutral -> \U0001F7E2 Long Bias" in alerter.messages[0]
+    assert "Long Bias -> \U0001F7E1 Neutral" in alerter.messages[1]
+    assert "system alert" not in alerter.messages[1]
+
+
+def test_short_bias_flip_is_not_announced():
+    alerter = CaptureAlerter()
+    scanner = make_scanner(alerter=alerter, timeframes=["15m"])
+
+    observe_bias(scanner, "Neutral")
+    observe_bias(scanner, "Long Bias")
+    observe_bias(scanner, "Neutral", minutes_later=5)
+    observe_bias(scanner, "Long Bias", minutes_later=20)
+    observe_bias(scanner, "Long Bias", minutes_later=5)
+
+    assert alerter.messages == []
+
+
+def test_recovery_is_sent_once_and_only_after_an_alert():
+    alerter = CaptureAlerter()
+    scanner = make_scanner(alerter=alerter)
+
+    scanner._resolve_incident("websocket", "Binance websocket reconnected.")
+    scanner._send_system_alert("websocket:connection-failed", "Websocket connection failed.")
+    scanner._resolve_incident("websocket", "Binance websocket reconnected.")
+    scanner._resolve_incident("websocket", "Binance websocket reconnected.")
+
+    assert len(alerter.messages) == 2
+    assert alerter.messages[0].startswith("⚠️ CF Scanner system alert")
+    assert alerter.messages[1] == "✅ CF Scanner recovered\nBinance websocket reconnected."
+
+
+def test_only_telegram_timeframes_are_sent_to_telegram():
+    alerter = CaptureAlerter()
+    scanner = make_scanner(alerter=alerter)
+    signal = make_signal(datetime(2026, 1, 1, tzinfo=timezone.utc), PLAN)
+
+    scanner._alert_signal(signal.model_copy(update={"timeframe": "5m"}))
+    scanner._alert_signal(signal.model_copy(update={"timeframe": "15m"}))
+
+    assert len(alerter.messages) == 1
+    assert "· 15m" in alerter.messages[0]
+
+
+def test_telegram_timeframes_can_be_set_from_env(monkeypatch):
+    monkeypatch.setenv("TELEGRAM_TIMEFRAMES", "5m, 1h")
+
+    assert Settings(_env_file=None).telegram_timeframes == ["5m", "1h"]

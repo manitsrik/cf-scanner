@@ -10,7 +10,7 @@ from pydantic_settings import BaseSettings, DotEnvSettingsSource, EnvSettingsSou
 
 
 class _CommaSeparatedListMixin:
-    comma_separated_fields = {"symbols", "timeframes"}
+    comma_separated_fields = {"symbols", "timeframes", "telegram_timeframes"}
 
     def prepare_field_value(self, field_name: str, field: Any, value: Any, value_is_complex: bool) -> Any:
         if field_name in self.comma_separated_fields and isinstance(value, str):
@@ -50,6 +50,9 @@ class Settings(BaseSettings):
     dashboard_url: str = "https://cf-scanner-production.up.railway.app/"
     telegram_bot_token: str | None = None
     telegram_chat_id: str | None = None
+    # Signals on every scanned timeframe are stored and shown on the dashboard, but
+    # only these are pushed to Telegram (5m is left out because it is the noisiest).
+    telegram_timeframes: list[str] = Field(default_factory=lambda: ["15m", "30m", "1h"])
     signal_db_path: str = "data/signals.db"
     railway_volume_mount_path: str | None = None
     signal_limit: int = 100

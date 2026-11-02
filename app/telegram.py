@@ -1,28 +1,132 @@
+import asyncio
 import logging
+import re
+from contextlib import suppress
+from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 
 import httpx
 
+from app.formatting import format_price
 from app.models import Signal
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_DASHBOARD_URL = "https://cf-scanner-production.up.railway.app/"
+# Thailand has no daylight saving time, so a fixed offset avoids needing tzdata.
+BANGKOK_TZ = timezone(timedelta(hours=7), "ICT")
+QUEUE_LIMIT = 200
+MAX_ATTEMPTS = 4
+MAX_RETRY_AFTER_SECONDS = 60
+DRAIN_TIMEOUT_SECONDS = 5
+BOT_TOKEN_IN_URL = re.compile(r"(api\.telegram\.org/bot)[^/\s]+")
+
+
+class _RedactBotToken(logging.Filter):
+    """httpx logs every request URL at INFO level, and Telegram URLs carry the bot token."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        message = record.getMessage()
+        if "api.telegram.org/bot" in message:
+            record.msg = BOT_TOKEN_IN_URL.sub(r"\1<redacted>", message)
+            record.args = ()
+        return True
+
+
+logging.getLogger("httpx").addFilter(_RedactBotToken())
+
+
+@dataclass
+class _Attempt:
+    sent: bool
+    error: str | None = None
+    # Seconds to wait before retrying; None means the error is permanent.
+    retry_after: float | None = None
 
 
 class TelegramAlerter:
-    def __init__(self, bot_token: str | None, chat_id: str | None, dashboard_url: str | None = None) -> None:
+    """Sends Telegram messages from a background queue.
+
+    Alerts are queued with ``notify`` so a slow or rate-limited Telegram API never
+    blocks candle processing, and failed sends are retried before being dropped.
+    """
+
+    def __init__(
+        self,
+        bot_token: str | None,
+        chat_id: str | None,
+        dashboard_url: str | None = None,
+        send_interval_seconds: float = 1.0,
+        retry_base_seconds: float = 2.0,
+    ) -> None:
         self.bot_token = bot_token
         self.chat_id = chat_id
         self.dashboard_url = dashboard_url or DEFAULT_DASHBOARD_URL
+        # Telegram allows roughly one message per second per chat.
+        self.send_interval_seconds = send_interval_seconds
+        self.retry_base_seconds = retry_base_seconds
+        self._queue: asyncio.Queue[str] = asyncio.Queue(maxsize=QUEUE_LIMIT)
+        self._worker: asyncio.Task | None = None
+        self._last_sent_at: datetime | None = None
+        self._last_error: str | None = None
+        self._last_error_at: datetime | None = None
+        self._failed_count = 0
 
     @property
     def enabled(self) -> bool:
         return bool(self.bot_token and self.chat_id)
 
-    async def send_signal(self, signal: Signal) -> bool:
-        direction = "Bullish" if signal.signal_type == "LONG" else "Bearish"
+    def start(self) -> None:
+        if self.enabled and (self._worker is None or self._worker.done()):
+            self._worker = asyncio.create_task(self._run())
+
+    async def stop(self) -> None:
+        if self._worker is None:
+            return
+        # Give queued alerts a moment to go out before shutdown (e.g. a redeploy).
+        with suppress(TimeoutError):
+            await asyncio.wait_for(self._queue.join(), timeout=DRAIN_TIMEOUT_SECONDS)
+        self._worker.cancel()
+        with suppress(asyncio.CancelledError):
+            await self._worker
+        self._worker = None
+
+    def status(self) -> dict:
+        return {
+            "enabled": self.enabled,
+            "queued": self._queue.qsize(),
+            "failed_count": self._failed_count,
+            "last_sent_at": self._last_sent_at.isoformat() if self._last_sent_at else None,
+            "last_error": self._last_error,
+            "last_error_at": self._last_error_at.isoformat() if self._last_error_at else None,
+        }
+
+    def notify(self, text: str) -> None:
+        """Queue a message for background delivery."""
+        if not self.enabled:
+            return
+        try:
+            self._queue.put_nowait(text)
+        except asyncio.QueueFull:
+            self._record_failure("Telegram queue is full; dropped an alert.")
+
+    def notify_signal(self, signal: Signal, candle_closed_at: datetime | None = None) -> None:
+        self.notify(self.format_signal(signal, candle_closed_at))
+
+    async def send_text(self, text: str) -> bool:
+        """Send one message immediately without retries, e.g. for the dashboard test button."""
+        if not self.enabled:
+            logger.info("Telegram alert skipped because TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID is missing.")
+            return False
+        async with httpx.AsyncClient(timeout=10) as client:
+            attempt = await self._attempt(client, text)
+        self._record(attempt)
+        return attempt.sent
+
+    @staticmethod
+    def format_signal(signal: Signal, candle_closed_at: datetime | None = None) -> str:
         marker = "\U0001F7E2" if signal.signal_type == "LONG" else "\U0001F534"
-        volume_ratio = signal.indicators.get("volume_ratio", 0)
+        volume_ratio = float((signal.indicators or {}).get("volume_ratio") or 0)
         plan = signal.trade_plan or {}
         summary = signal.trader_summary or "รอข้อมูลเพิ่มเติมก่อนสรุปแผนเทรด"
         quality = (
@@ -30,68 +134,111 @@ class TelegramAlerter:
             if signal.quality_label and signal.quality_score is not None
             else "N/A"
         )
-        status = (signal.status or {}).get("label") or "Active"
-        text = (
-            f"{marker} {direction} {signal.signal_type} signal\n"
-            f"{signal.symbol} | {signal.timeframe}\n"
-            f"Price: {signal.price:.4f}\n"
-            f"RSI 14: {signal.rsi:.2f}\n"
-            f"Volume: {volume_ratio:.2f}x avg20\n"
-            f"Quality: {quality}\n"
-            f"Status: {status}\n\n"
-            f"{summary}\n\n"
-            "Trade plan:\n"
-            f"- Entry: {self._price(plan.get('entry_zone_low'))} - {self._price(plan.get('entry_zone_high'))}\n"
-            f"- SL: {self._price(plan.get('stop_loss'))} ({self._pct(plan.get('risk_pct'))} risk)\n"
-            f"- TP1: {self._price(plan.get('take_profit_1'))} | TP2: {self._price(plan.get('take_profit_2'))}\n\n"
-            "Checks:\n"
-            + "\n".join(f"- {reason}" for reason in signal.reasons[:3])
-            + "\n\n"
-            f"{signal.tradingview_url}"
-        )
-        return await self.send_text(text)
+        lines = [f"{marker} {signal.signal_type} {signal.symbol} · {signal.timeframe}"]
+        if candle_closed_at is not None:
+            if candle_closed_at.tzinfo is None:
+                candle_closed_at = candle_closed_at.replace(tzinfo=timezone.utc)
+            # Close times end 1 ms before the next candle, so round up to the minute.
+            closed = (candle_closed_at + timedelta(seconds=1)).astimezone(BANGKOK_TZ)
+            lines.append(f"แท่งปิด {closed:%d/%m %H:%M} (เวลาไทย) · Quality: {quality}")
+        else:
+            lines.append(f"Quality: {quality}")
+        lines.append(f"Price {format_price(signal.price)} · RSI {signal.rsi:.1f} · Vol {volume_ratio:.2f}x")
 
-    @staticmethod
-    def _price(value: object) -> str:
-        try:
-            return f"{float(value):.6g}"
-        except (TypeError, ValueError):
-            return "-"
+        if plan:
+            risk_pct = plan.get("risk_pct")
+            risk_text = f" (-{float(risk_pct):.2f}%)" if risk_pct is not None else ""
+            lines += [
+                "",
+                f"Entry {format_price(plan.get('entry_zone_low'))} – {format_price(plan.get('entry_zone_high'))}",
+                f"SL {format_price(plan.get('stop_loss'))}{risk_text}",
+                f"TP1 {format_price(plan.get('take_profit_1'))} · TP2 {format_price(plan.get('take_profit_2'))}",
+            ]
 
-    @staticmethod
-    def _pct(value: object) -> str:
-        try:
-            return f"{float(value):.2f}%"
-        except (TypeError, ValueError):
-            return "-"
+        lines += ["", summary, "", f"Chart: {signal.tradingview_url}"]
+        return "\n".join(lines)
 
-    async def send_text(self, text: str) -> bool:
-        if not self.enabled:
-            logger.info("Telegram alert skipped because TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID is missing.")
-            return False
+    async def _run(self) -> None:
+        async with httpx.AsyncClient(timeout=10) as client:
+            while True:
+                text = await self._queue.get()
+                try:
+                    await self._deliver(client, text)
+                except Exception as exc:
+                    # Keep the worker alive whatever happens to a single message.
+                    self._record_failure(f"Unexpected Telegram error: {type(exc).__name__}")
+                finally:
+                    self._queue.task_done()
+                await asyncio.sleep(self.send_interval_seconds)
 
-        if self.dashboard_url and self.dashboard_url not in text:
-            text = f"{text}\n\nDashboard: {self.dashboard_url}"
+    async def _deliver(self, client: httpx.AsyncClient, text: str) -> bool:
+        for attempt_number in range(1, MAX_ATTEMPTS + 1):
+            attempt = await self._attempt(client, text)
+            if attempt.sent or attempt.retry_after is None or attempt_number == MAX_ATTEMPTS:
+                self._record(attempt)
+                return attempt.sent
+            logger.warning("%s Retrying in %.0f seconds.", attempt.error, attempt.retry_after)
+            await asyncio.sleep(attempt.retry_after)
+        return False
 
+    async def _attempt(self, client: httpx.AsyncClient, text: str) -> _Attempt:
         url = f"https://api.telegram.org/bot{self.bot_token}/sendMessage"
-
+        payload = {
+            "chat_id": self.chat_id,
+            "text": self._with_dashboard(text),
+            "link_preview_options": {"is_disabled": True},
+        }
         # httpx error messages embed the request URL, which contains the bot token,
-        # so never log the raw exception.
+        # so never log or store the raw exception.
         try:
-            async with httpx.AsyncClient(timeout=10) as client:
-                response = await client.post(url, json={"chat_id": self.chat_id, "text": text})
-                response.raise_for_status()
-                return True
-        except httpx.HTTPStatusError as exc:
-            logger.error(
-                "Failed to send Telegram alert: HTTP %s %s",
-                exc.response.status_code,
-                self._redact(exc.response.text[:200]),
-            )
-            return False
+            response = await client.post(url, json=payload)
         except httpx.HTTPError as exc:
-            logger.error("Failed to send Telegram alert: %s %s", type(exc).__name__, self._redact(str(exc)))
-            return False
+            error = f"Telegram request failed: {type(exc).__name__} {self._redact(str(exc))}".strip()
+            return _Attempt(sent=False, error=error, retry_after=self.retry_base_seconds)
+
+        if response.is_success:
+            return _Attempt(sent=True)
+
+        description = self._redact(self._description(response))
+        error = f"Telegram API returned HTTP {response.status_code}: {description}"
+        if response.status_code == 429:
+            return _Attempt(sent=False, error=error, retry_after=self._retry_after(response))
+        if response.status_code >= 500:
+            return _Attempt(sent=False, error=error, retry_after=self.retry_base_seconds)
+        # Other 4xx errors (bad token, unknown chat, bot blocked) will not fix themselves.
+        return _Attempt(sent=False, error=error)
+
+    def _record(self, attempt: _Attempt) -> None:
+        if attempt.sent:
+            self._last_sent_at = datetime.now(timezone.utc)
+            self._last_error = None
+        else:
+            self._record_failure(attempt.error or "Telegram send failed.")
+
+    def _record_failure(self, error: str) -> None:
+        logger.error("Failed to send Telegram alert: %s", error)
+        self._failed_count += 1
+        self._last_error = error
+        self._last_error_at = datetime.now(timezone.utc)
+
+    def _with_dashboard(self, text: str) -> str:
+        if self.dashboard_url and self.dashboard_url not in text:
+            return f"{text}\n\nDashboard: {self.dashboard_url}"
+        return text
+
+    @staticmethod
+    def _description(response: httpx.Response) -> str:
+        try:
+            return str(response.json().get("description") or response.reason_phrase)
+        except ValueError:
+            return response.text[:200] or response.reason_phrase
+
+    def _retry_after(self, response: httpx.Response) -> float:
+        try:
+            seconds = float(response.json()["parameters"]["retry_after"])
+        except (ValueError, KeyError, TypeError):
+            seconds = self.retry_base_seconds
+        return min(max(seconds, 0), MAX_RETRY_AFTER_SECONDS)
 
     def _redact(self, value: str) -> str:
         return value.replace(self.bot_token, "<redacted>") if self.bot_token else value
