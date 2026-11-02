@@ -22,6 +22,9 @@ logger = logging.getLogger(__name__)
 LOOP_RESTART_SECONDS = 5
 WEBSOCKET_OPEN_TIMEOUT = 20
 WEBSOCKET_CLOSE_TIMEOUT = 10
+# A signal is tracked for this many closed candles, matching the local backtest lookahead.
+SIGNAL_TRACKING_CANDLES = 12
+FINAL_SIGNAL_STATES = {"tp1", "stopped", "expired"}
 
 
 class MarketDataError(Exception):
@@ -130,9 +133,17 @@ class FuturesScanner:
     async def _load_initial_candles(self) -> None:
         semaphore = asyncio.Semaphore(self.settings.rest_concurrency)
 
-        async def fetch_with_limit(symbol: str, timeframe: str) -> tuple[str, str, pd.DataFrame]:
+        async def fetch_with_limit(symbol: str, timeframe: str) -> tuple[str, str, pd.DataFrame] | None:
             async with semaphore:
-                return await self._fetch_klines(client, symbol, timeframe)
+                # Binance escalates repeated 429s to an IP ban (418), so stop the
+                # rest of this refresh as soon as one request is rate limited.
+                if self._rest_backoff_active():
+                    return None
+                try:
+                    return await self._fetch_klines(client, symbol, timeframe)
+                except MarketDataError as exc:
+                    self._schedule_rest_backoff(exc.status_code)
+                    raise
 
         async with httpx.AsyncClient(base_url=self.settings.binance_rest_url, timeout=15) as client:
             tasks = [
@@ -144,13 +155,15 @@ class FuturesScanner:
 
         had_error = False
         for result in results:
+            if result is None:
+                had_error = True
+                continue
             if isinstance(result, Exception):
                 had_error = True
                 if isinstance(result, MarketDataError):
                     message = result.dashboard_message()
                     self._set_error("rest", message)
                     self._record_event("error", message)
-                    self._schedule_rest_backoff(result.status_code)
                     await self._send_system_alert(f"market-data:{result.status_code}", message)
                 else:
                     message = f"Initial candle load failed: {result}"
@@ -160,7 +173,7 @@ class FuturesScanner:
                 logger.error("Initial candle load failed: %s", result)
                 continue
             symbol, timeframe, candles = result
-            self._set_candles(symbol, timeframe, candles)
+            self._set_candles(symbol, timeframe, self._merge_newer_candles(symbol, timeframe, candles))
             signal = self._detect_signal(symbol, timeframe)
             if signal and self.store.add_if_new(signal, self.settings.signal_cooldown_minutes):
                 logger.info("New %s signal for %s %s from REST refresh.", signal.signal_type, symbol, timeframe)
@@ -448,6 +461,24 @@ class FuturesScanner:
         self._candles[key] = candles
         self._candle_revisions[key] = self._candle_revisions.get(key, 0) + 1
 
+    def _merge_newer_candles(self, symbol: str, timeframe: str, snapshot: pd.DataFrame) -> pd.DataFrame:
+        """Keep closed candles the websocket added while this REST snapshot was in flight.
+
+        A full REST refresh takes a while, so a candle can close (and arrive over the
+        websocket) after its pair was fetched but before the snapshot is applied.
+        """
+        current = self._candles.get((symbol, timeframe))
+        if current is None or current.empty:
+            return snapshot
+        if snapshot.empty:
+            return current
+
+        newer = current[current["open_time"] > snapshot["open_time"].iloc[-1]]
+        if newer.empty:
+            return snapshot
+        merged = pd.concat([snapshot, newer], ignore_index=True)
+        return merged.tail(self.settings.kline_limit).reset_index(drop=True)
+
     def _forget_dropped_pairs(self, active_pairs: set[tuple[str, str]]) -> None:
         for cache in (self._candle_revisions, self._indicator_frames, self._indicator_snapshots):
             for key in [key for key in cache if key not in active_pairs]:
@@ -625,27 +656,42 @@ class FuturesScanner:
         )
 
     def enrich_signal_context(self, signal: Signal) -> dict:
-        candles = self._candles.get((signal.symbol, signal.timeframe))
-        if candles is None or len(candles) < 30:
+        stored_status = signal.status or {}
+        if stored_status.get("state") in FINAL_SIGNAL_STATES:
             return {
                 "trade_plan": signal.trade_plan or {},
                 "backtest": signal.backtest or {},
-                "status": signal.status or {"state": "waiting", "label": "Waiting for market data"},
-            }
-
-        df = self._indicator_frame(signal.symbol, signal.timeframe)
-        if df is None:
-            return {
-                "trade_plan": signal.trade_plan or {},
-                "backtest": signal.backtest or {},
-                "status": signal.status or {"state": "waiting", "label": "Waiting for market data"},
+                "status": stored_status,
             }
 
         signal_time = self._signal_close_time(signal)
+        candles = self._candles.get((signal.symbol, signal.timeframe))
+        df = self._indicator_frame(signal.symbol, signal.timeframe) if candles is not None and len(candles) >= 30 else None
+        if df is None:
+            if self._tracking_window_passed(signal.timeframe, signal_time):
+                # No candles (e.g. the symbol left the watchlist) and the tracking window
+                # is over, so the stored "Active" status can never be resolved.
+                status = self._untracked_status("No candle data is loaded for this signal anymore")
+            else:
+                status = signal.status or {"state": "waiting", "label": "Waiting for market data"}
+            return {"trade_plan": signal.trade_plan or {}, "backtest": signal.backtest or {}, "status": status}
+
+        if not self._signal_in_window(df, signal_time):
+            # The signal candle has scrolled out of the loaded candles, so its outcome
+            # can no longer be measured. Never simulate it on unrelated candles.
+            return {
+                "trade_plan": signal.trade_plan or {},
+                "backtest": signal.backtest or {},
+                "status": self._untracked_status("Signal is older than the loaded candle window"),
+            }
+
         signal_index = self._signal_index(df, signal_time)
         trade_plan = signal.trade_plan or self._trade_plan(signal.signal_type, df, signal_index)
         backtest = signal.backtest or self._signal_backtest(df, signal.signal_type)
         status = self._signal_status(signal.signal_type, trade_plan, df, signal_time)
+        if status.get("state") in FINAL_SIGNAL_STATES:
+            # Freeze the outcome so it survives after the candles scroll out of the window.
+            self.store.update_status(signal.id, status)
         summary = signal.trader_summary or trader_summary(
             signal_type=signal.signal_type,
             quality_label=signal.quality_label,
@@ -712,7 +758,7 @@ class FuturesScanner:
             "note": "Position size should be based on stop distance, not on signal confidence.",
         }
 
-    def _signal_backtest(self, df: pd.DataFrame, signal_type: str, lookahead: int = 12) -> dict:
+    def _signal_backtest(self, df: pd.DataFrame, signal_type: str, lookahead: int = SIGNAL_TRACKING_CANDLES) -> dict:
         if len(df) < 220:
             return {"sample_size": 0, "summary": "Need at least 220 candles for local backtest"}
 
@@ -756,7 +802,7 @@ class FuturesScanner:
             return {"state": "waiting", "label": "Waiting for plan"}
 
         signal_index = self._signal_index(df, signal_time)
-        after = df.iloc[signal_index + 1 :]
+        after = df.iloc[signal_index + 1 : signal_index + 1 + SIGNAL_TRACKING_CANDLES]
         if after.empty:
             return {"state": "active", "label": "Active", "detail": "Waiting for the next closed candle"}
 
@@ -782,11 +828,11 @@ class FuturesScanner:
                 "current_move_pct": move_pct,
                 "updated_at": latest_time,
             }
-        if len(after) >= 12:
+        if len(after) >= SIGNAL_TRACKING_CANDLES:
             return {
                 "state": "expired",
                 "label": "Expired",
-                "detail": "No TP1 or stop hit within 12 closed candles",
+                "detail": f"No TP1 or stop hit within {SIGNAL_TRACKING_CANDLES} closed candles",
                 "current_move_pct": move_pct,
                 "updated_at": latest_time,
             }
@@ -868,6 +914,28 @@ class FuturesScanner:
         if len(parts) >= 3 and parts[2].isdigit():
             return datetime.fromtimestamp(int(parts[2]), tz=timezone.utc)
         return signal.created_at
+
+    @staticmethod
+    def _untracked_status(detail: str) -> dict:
+        return {"state": "untracked", "label": "Not tracked", "detail": detail}
+
+    def _tracking_window_passed(self, timeframe: str, signal_time: datetime | None) -> bool:
+        if signal_time is None:
+            return False
+        if signal_time.tzinfo is None:
+            signal_time = signal_time.replace(tzinfo=timezone.utc)
+        tracking_seconds = self._timeframe_seconds(timeframe) * SIGNAL_TRACKING_CANDLES
+        return (datetime.now(timezone.utc) - signal_time).total_seconds() >= tracking_seconds
+
+    @staticmethod
+    def _signal_in_window(df: pd.DataFrame, signal_time: datetime | None) -> bool:
+        if signal_time is None or df.empty:
+            return True
+        if signal_time.tzinfo is None:
+            signal_time = signal_time.replace(tzinfo=timezone.utc)
+        # Signal ids carry the candle close time truncated to whole seconds, which
+        # falls inside the signal candle, so compare against the first open time.
+        return pd.Timestamp(signal_time) >= df["open_time"].iloc[0]
 
     @staticmethod
     def _signal_index(df: pd.DataFrame, signal_time: datetime | None) -> int:
@@ -1267,6 +1335,9 @@ class FuturesScanner:
             }
         )
 
+    def _rest_backoff_active(self) -> bool:
+        return self._rest_backoff_until is not None and datetime.now(timezone.utc) < self._rest_backoff_until
+
     def _schedule_rest_backoff(self, status_code: int) -> None:
         if status_code not in {418, 429}:
             return
@@ -1294,7 +1365,10 @@ class FuturesScanner:
         return float(value)
 
     @staticmethod
-    def _klines_to_dataframe(klines: list[list]) -> pd.DataFrame:
+    def _klines_to_dataframe(klines: list[list], now_ms: int | None = None) -> pd.DataFrame:
+        # Binance REST returns the still-forming candle as the last row. Drop it so
+        # signals are only ever evaluated on closed candles, like the websocket path.
+        now_ms = int(datetime.now(timezone.utc).timestamp() * 1000) if now_ms is None else now_ms
         return pd.DataFrame(
             [
                 {
@@ -1307,5 +1381,6 @@ class FuturesScanner:
                     "close_time": pd.to_datetime(item[6], unit="ms", utc=True),
                 }
                 for item in klines
+                if int(item[6]) < now_ms
             ]
         )

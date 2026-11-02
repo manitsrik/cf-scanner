@@ -98,6 +98,13 @@ Open the dashboard:
 http://localhost:8000
 ```
 
+Run the tests:
+
+```bash
+pip install -r requirements-dev.txt
+pytest
+```
+
 ## API
 
 - `GET /health`

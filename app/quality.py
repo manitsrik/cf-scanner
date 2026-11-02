@@ -148,6 +148,8 @@ def trader_summary(
         action = "สัญญาณนี้โดน stop แล้ว ควรตัดออกจากแผนและรอสัญญาณใหม่"
     elif state == "expired":
         action = "สัญญาณหมดอายุแล้ว เพราะไม่ไปถึง TP1 หรือ SL ในกรอบเวลาที่กำหนด ควรรอ setup ใหม่"
+    elif state == "untracked":
+        action = "สัญญาณนี้เก่ากว่าข้อมูลแท่งเทียนที่โหลดไว้ ติดตามผลไม่ได้แล้ว ใช้เป็นข้อมูลอ้างอิงเท่านั้น"
     elif score >= 85 and risk_pct <= 6 and relation != "conflicts":
         action = "แผนที่เหมาะคือรอราคาอยู่ใน entry zone แล้วค่อยพิจารณาเข้า ไม่ไล่ราคา และวาง stop ตามแผน"
     elif score >= 70:

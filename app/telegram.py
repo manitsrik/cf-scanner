@@ -75,11 +75,23 @@ class TelegramAlerter:
 
         url = f"https://api.telegram.org/bot{self.bot_token}/sendMessage"
 
+        # httpx error messages embed the request URL, which contains the bot token,
+        # so never log the raw exception.
         try:
             async with httpx.AsyncClient(timeout=10) as client:
                 response = await client.post(url, json={"chat_id": self.chat_id, "text": text})
                 response.raise_for_status()
                 return True
-        except httpx.HTTPError:
-            logger.exception("Failed to send Telegram alert.")
+        except httpx.HTTPStatusError as exc:
+            logger.error(
+                "Failed to send Telegram alert: HTTP %s %s",
+                exc.response.status_code,
+                self._redact(exc.response.text[:200]),
+            )
             return False
+        except httpx.HTTPError as exc:
+            logger.error("Failed to send Telegram alert: %s %s", type(exc).__name__, self._redact(str(exc)))
+            return False
+
+    def _redact(self, value: str) -> str:
+        return value.replace(self.bot_token, "<redacted>") if self.bot_token else value

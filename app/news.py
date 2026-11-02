@@ -49,53 +49,103 @@ COIN_NAMES = {
     "SHIB": ["shiba inu", "shib"],
 }
 
+# Keywords match whole words only (so "sec" does not hit "second" and "ban" does
+# not hit "bank"), which is why common inflections are listed explicitly.
 HIGH_IMPACT_KEYWORDS = {
     "approval",
     "approved",
+    "approves",
     "ban",
+    "banned",
+    "bans",
     "cpi",
     "delist",
+    "delisted",
     "delisting",
     "etf",
+    "etfs",
     "exploit",
+    "exploited",
     "fed",
     "hack",
+    "hacked",
+    "hacker",
+    "hackers",
     "lawsuit",
+    "lawsuits",
     "regulation",
+    "regulations",
     "regulator",
+    "regulators",
     "reserve",
     "sec",
     "settlement",
     "stablecoin",
+    "stablecoins",
     "tariff",
+    "tariffs",
 }
 POSITIVE_KEYWORDS = {
     "adoption",
     "approval",
     "approved",
+    "approves",
     "bullish",
     "funding",
     "inflow",
+    "inflows",
     "launch",
+    "launched",
+    "launches",
     "partnership",
     "record",
     "rises",
     "surge",
+    "surged",
+    "surges",
 }
 NEGATIVE_KEYWORDS = {
     "ban",
+    "banned",
+    "bans",
     "bearish",
     "crackdown",
     "decline",
+    "declined",
+    "declines",
     "delist",
+    "delisted",
     "exploit",
+    "exploited",
     "falls",
     "hack",
+    "hacked",
+    "hacker",
+    "hackers",
     "lawsuit",
+    "lawsuits",
     "outflow",
+    "outflows",
     "plunge",
+    "plunged",
+    "plunges",
     "selloff",
 }
+MARKET_WIDE_TERMS = [
+    "crypto market",
+    "bitcoin etf",
+    "bitcoin etfs",
+    "fed",
+    "federal reserve",
+    "sec",
+    "stablecoin",
+    "stablecoins",
+    "regulation",
+    "regulations",
+    "cpi",
+    "tariff",
+    "tariffs",
+]
 
 
 class CryptoNewsService:
@@ -241,15 +291,18 @@ class CryptoNewsService:
     @staticmethod
     def _is_market_wide(item: dict) -> bool:
         text = f"{item.get('title', '')} {item.get('summary', '')}".lower()
-        terms = ["crypto market", "bitcoin etf", "fed", "sec", "stablecoin", "regulation", "cpi", "tariff"]
-        return any(term in text for term in terms)
+        return any(CryptoNewsService._contains_term(text, term) for term in MARKET_WIDE_TERMS)
+
+    @staticmethod
+    def _keyword_hits(text: str, keywords: set[str]) -> list[str]:
+        return sorted(keyword for keyword in keywords if CryptoNewsService._contains_term(text, keyword))
 
     @staticmethod
     def _classify(item: dict, matched_symbols: list[str]) -> dict:
         text = f"{item.get('title', '')} {item.get('summary', '')}".lower()
-        positive_hits = sorted(keyword for keyword in POSITIVE_KEYWORDS if keyword in text)
-        negative_hits = sorted(keyword for keyword in NEGATIVE_KEYWORDS if keyword in text)
-        high_hits = sorted(keyword for keyword in HIGH_IMPACT_KEYWORDS if keyword in text)
+        positive_hits = CryptoNewsService._keyword_hits(text, POSITIVE_KEYWORDS)
+        negative_hits = CryptoNewsService._keyword_hits(text, NEGATIVE_KEYWORDS)
+        high_hits = CryptoNewsService._keyword_hits(text, HIGH_IMPACT_KEYWORDS)
 
         sentiment = "Neutral"
         if len(positive_hits) > len(negative_hits):

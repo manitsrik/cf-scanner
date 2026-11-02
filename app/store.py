@@ -46,6 +46,27 @@ class SignalStore:
             self._trim_saved_signals()
             return True
 
+    def update_status(self, signal_id: str, status: dict) -> None:
+        with self._lock:
+            for index, saved in enumerate(self._signals):
+                if saved.id == signal_id:
+                    self._signals[index] = saved.model_copy(update={"status": status})
+                    break
+
+            if not self.db_path:
+                return
+
+            with closing(sqlite3.connect(self.db_path)) as connection:
+                with connection:
+                    row = connection.execute("SELECT payload FROM signals WHERE id = ?", (signal_id,)).fetchone()
+                    if not row:
+                        return
+                    updated = Signal.model_validate_json(row[0]).model_copy(update={"status": status})
+                    connection.execute(
+                        "UPDATE signals SET payload = ? WHERE id = ?",
+                        (updated.model_dump_json(), signal_id),
+                    )
+
     def list(self) -> list[Signal]:
         if self.db_path:
             return self._list_saved_signals()
